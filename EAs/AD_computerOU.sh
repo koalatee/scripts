@@ -13,8 +13,8 @@ apiPass=$(DecryptString $5 '' '')
 # API URL
 apiURL="https://your.jss.here:8443"
 
-ad_computer_name=`dsconfigad -show | grep "Computer Account" | awk '{print $4}'`
-ad_computer_ou=`dscl /Search read /Computers/$ad_computer_name | \
+ad_computer_name=$(dsconfigad -show | grep "Computer Account" | awk '{print $4}')
+ad_computer_ou=$(dscl /Search read /Computers/$ad_computer_name | \
 grep -A 1 dsAttrTypeNative:distinguishedName | \
 cut -d, -f2- | sed -n 's/OU\=//gp' | \
 sed -n 's/\(.*\),DC\=/\1./gp' | \
@@ -28,7 +28,7 @@ N--
 }
 
 printf "%s",$1
-}'`
+}')
 echo "Computer $ad_computer_name is in OU $ad_computer_ou" 
 udid=$(/usr/sbin/system_profiler SPHardwareDataType | /usr/bin/awk '/Hardware UUID:/ { print $3 }')
 xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attributes><extension_attribute><name>AD_OU</name><value>$ad_computer_ou</value></extension_attribute></extension_attributes></computer>"
@@ -36,7 +36,7 @@ xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attrib
 # Identify the location of the jamf binary for the jamf_binary variable.
 CheckBinary (){
 # Identify location of jamf binary.
-jamf_binary=`/usr/bin/which jamf`
+jamf_binary=$(/usr/bin/which jamf)
 
 if [[ "$jamf_binary" == "" ]] && [[ -e "/usr/sbin/jamf" ]] && [[ ! -e "/usr/local/bin/jamf" ]]; then
 jamf_binary="/usr/sbin/jamf"
