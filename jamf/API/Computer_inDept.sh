@@ -1,5 +1,6 @@
 #!/bin/bash
-# put all computer names in the department groups and output to .csv on /Users/$loggedInUser/Desktop
+# put all computer names in the department groups and output to single .csv on /Users/$loggedInUser/Desktop
+# puts total number of machines in each dept
 # Sorted by Department
 
 ###### Variables ######
