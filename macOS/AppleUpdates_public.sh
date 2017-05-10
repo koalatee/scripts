@@ -8,7 +8,7 @@
 # Runs Apple Updates in background
 # Prompts user to restart for updates that require a restart
 # jjourney 05/2016
-# Works on OSX version 10.9.x, 10.10.x, and 10.11.x 
+# Works on OSX version 10.9.x, 10.10.x, 10.11.x, and 10.12.x
 # Mostly pulled from https://jamfnation.jamfsoftware.com/discussion.html?id=7827
 
 # 03/2017 UPDATE - added better checking for installing updates. Updates are now cached and "recommended" are 
