@@ -1,0 +1,79 @@
+#!/bin/sh
+
+##### jjourney 1/2017 #####
+#
+# adds user as admin
+# because $AD OU is full of h*ck
+#
+# Adapted from macmule @ 
+# https://macmule.com//2015/11/04/ad-users-losing-admin-rights-when-off-the-domain/
+# +
+# https://github.com/macmule/AD-Users-Losing-Admin-Rights-When-Off-The-Domain
+#
+###########################
+
+jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
+
+### 
+# Get the username of the logged in user
+loggedInUser=`python -c 'from SystemConfiguration import SCDynamicStoreCopyConsoleUser; import sys; username = (SCDynamicStoreCopyConsoleUser(None, None, None) or [None])[0]; username = [username,""][username in [u"loginwindow", None, u""]]; sys.stdout.write(username + "\n");'`
+
+# Make sure someone is logged in
+if [[ -z "$loggedInUser" ]]; then
+    echo "No one logged in"
+    exit 1
+fi
+
+# Make sure this account is an AD account (UID > 1000)
+if [ $(dscl . -read /Users/"$loggedInUser" | awk '/UniqueID:/{ print $NF}') -lt 1000 ]; then
+    echo "$loggedInUser is a local account"
+    "$jamfHelper" \
+        -windowType hud \
+        -alignDescription center \
+        -title "Error" \
+        -description "The current logged in user ($loggedInUser) appears to be a local account." \
+        -button1 "OK" \
+        -lockHUD
+    exit 2
+fi
+
+## Get members of mac local admin group
+adminGroupMembership=$(dscl . -read /Groups/admin | awk '/GroupMembership:/{for(i=2;i<=NF;i++){out=out" "$i}; print out}')
+
+# Check to see if the user is part of the local admin group
+if [[ $adminGroupMembership =~ "$loggedInUser" ]]; then
+        echo "$loggedInUser is already a local admin"
+        "$jamfHelper" \
+            -windowType hud \
+            -alignDescription center \
+            -title "Error" \
+            -description "The username $loggedInUser is already a member of the local admin group" \
+            -button1 "OK" \
+            -lockHUD
+        exit 0
+else 
+    # If user is an admin through AD but not local (/Group/admin) then 
+    # Add user to local admin group
+    echo "add $loggedInUser to local admin group"
+    sudo dseditgroup -o edit -n /Local/Default -a "$loggedInUser" -t user admin
+    # Run another check to make sure it has been added
+    adminGroupMembership=$(dscl . -read /Groups/admin | awk '/GroupMembership:/{for(i=2;i<=NF;i++){out=out" "$i}; print out}')
+    if [[ $adminGroupMembership =~ "$loggedInUser" ]]; then
+        "$jamfHelper" \
+            -windowType hud \
+            -alignDescription center \
+            -title "Success" \
+            -description "Fixed admin access for $loggedInUser." \
+            -button1 "OK" \
+            -lockHUD
+    else
+    "$jamfHelper" \
+        -windowType hud \
+        -alignDescription center \
+        -title "Error" \
+        -description "Possible error fixing username $loggedInUser" \
+        -button1 "OK" \
+        -lockHUD
+    fi
+fi
+
