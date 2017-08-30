@@ -17,8 +17,8 @@ loggedInUser="$(python -c 'from SystemConfiguration import SCDynamicStoreCopyCon
 Output="/Users/$loggedInUser/Desktop/department+computers.csv"
 
 # JSS
-jss="https://your.jss.here:8443"
-CD2_trigger="polCocoaDialog"
+jss="" # include :8443
+CD2_trigger=""
 
 ###### Exit if CD not found ######
 # Will try and download Cocoa Dialog policy with trigger listed
