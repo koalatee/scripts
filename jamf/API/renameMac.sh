@@ -12,7 +12,7 @@ jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/
 
 # JSS
 jss="https://your.jss.here:8443"
-
+AD="your.domain.here"
 
 ###### Exit if CD not found ######
 # Will try and download policy with trigger listed
