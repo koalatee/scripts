@@ -17,6 +17,7 @@ jamfBin="/usr/local/jamf/bin/jamf"
 # JSS
 jss="https://your.jss.here:8443"
 CD2_trigger="polCocoaDialog"
+AD="your.domain.here"
 
 # Department, overwrites if another department is specified later.
 apiDeptData="<computer><location><department/></location></computer>"
