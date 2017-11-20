@@ -87,7 +87,7 @@ while [[ $i -ne $max_id ]]
 do
     current_policy="$(curl \
         -s \
-        -v \
+        -f \
         -u ${username}:${password} \
         -X GET $jss/JSSResource/policies/id/$i \
         -H "Accept:application/xml" \
