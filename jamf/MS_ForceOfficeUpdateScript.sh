@@ -9,6 +9,8 @@
 
 #### jamf variables
 # full installer variables
+# See line 32 for naming, this assumes you have a pkg named Office2016-$currentVersion
+# Example: Office2016-15.40.pkg
 fulltriggercache="polOfficeUpdateScriptCache"
 fulltriggerinstall="polOfficeUpdateScriptInstall"
 
@@ -21,8 +23,8 @@ outlooktriggerinstall="polOutlookInstall"
 mautriggerinstall="polMAUInstall"
 
 # set in script parameters in jamf
-currentVerAll="$4"
-currentVerMAU="$5"
+currentVerAll="$4" # eg 15.40
+currentVerMAU="$5" # eg 3.11
 
 # local parameters
 jamfBin="/usr/local/jamf/bin/jamf"
