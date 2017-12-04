@@ -3,6 +3,9 @@
 # Change mac location through Self Service Policy
 # jjourney 07/2016
 
+# set your jss
+# set your $AD
+
 
 ###### Variables ######
 # System
@@ -11,12 +14,12 @@ computerName="$(scutil --get ComputerName)"
 serialNumber="$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')"
 
 # JSS
+AD=""
 jss="https://your.jss.here:8443"
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 
 # Department, overwrites if another department is specified later.
 apiDeptData="<computer><location><department/></location></computer>"
-
 
 ###### Exit if CD not found ######
 # Will try and download policy with trigger listed
@@ -85,7 +88,6 @@ password=${password_Full:3}
 ## Get all Buildings
 allBuildings="$(curl \
     -s \
-    -v \
     -u $username:$password \
     -X GET $jss/JSSResource/buildings \
     -H "Accept: application/xml" \
@@ -122,7 +124,6 @@ apiBuildingData="$(echo "<computer><location><building><name>$Building</name></b
 # PUT command, updating building
 curl \
     -s \
-    -v \
     -u $username:$password \
     -X PUT \
     -H "Content-Type: text/xml" \
@@ -130,7 +131,6 @@ curl \
 # PUT command, updating location
 curl \
     -s \
-    -v \
     -u $username:$password \
     -X PUT \
     -H "Content-Type: text/xml" \
@@ -139,7 +139,6 @@ curl \
 # New Check
 checkBuilding="$(curl \
     -s \
-    -v \
     -u $username:$password \
     -X GET $jss/JSSResource/computers/serialnumber/$serialNumber \
     -H "Accept: application/xml" \
