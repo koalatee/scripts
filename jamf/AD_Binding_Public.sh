@@ -15,6 +15,30 @@
 # UPDATE 09/30/2016
 # Remove API name change from binding in case passwords are not allowed
 # Call the 'rename' script instead
+#
+# UPDATE 11/2/2016
+# Now shows an error message if binding did not happen
+#
+# UPDATE 12/6/2016
+# Now checks for a dummy receipt for the 'auto Install Applications' and if not, asks if the user wants to add the 802.1x profile
+# Saying 'yes' will download the pkg/receipt and the user will be added to a Smart Group that gets the 802.1x profile
+#
+# UPDATE 6/9/2017
+# Set the password policy to 180 days, from 45
+#
+# UPDATE 9/18/2017
+# change ldap.conf from
+# TLS_REQCERT demand to TLS_REQCERT allow
+# changed all ldap:// to ldaps://
+#
+# UPDATE 12/6/2017
+# automatically add the autoinstallreceipt.pkg for 802.1x profile
+# commented out old ? (end of script)
+#
+# UPDATE 12/11/2017
+# ldapsearch now queries against IP instead of FQDN
+# IPGET checks all IPs against $domainFull
+# removes problematic ones, should cut down on time 
 
 ###### Variables ######
 # System
@@ -26,9 +50,9 @@ jamfBin="/usr/local/jamf/bin/jamf"
 
 # JSS
 jss=""
-CD2_trigger="polCocoaDialog"
-rename_trigger="enrRenameMac"
-forceName_trigger="polForceName"
+CD2_trigger=""
+rename_trigger=""
+forceName_trigger=""
 
 ## AD variables 
 adUser="" # user (should be a service account) to do some checks
@@ -36,6 +60,24 @@ domain="" # short name for domain (for user input)
 domainFull="" # your.domain.here
 DomainC="ou=$OU_main,dc=$dc_info_here" # where do you want to start looking?
 domainPreferred="" # what DC do you want to be preferred
+userAdmin="$domain\\$user_group_name" # do you want a user group to have admin rights
+groupAdmin="$domain\\$IT_group_name" # do you want an IT/admin group to have admin rights
+
+## Get IP of domain and select one 
+# add any problem IPs into the delete array below
+delete=()
+
+function IPGET() {
+domainIPall=($(dig +short $domainFull))
+for del in ${delete[@]}
+do 
+    domainIPall=("${domainIPall[@]/$del}")
+done
+randomIP=$[$RANDOM % ${#domainIPall[@]}]
+domainIP=${domainIPall[$randomIP]}
+delete+=($domainIP) # if one fails, it won't try it again
+echo "using $domainIP"
+}
 
 ###### Exit if CD not found ######
 # Will try and download Cocoa Dialog policy with trigger listed
@@ -67,6 +109,8 @@ if [[ $i -eq 4 ]]; then
     exit 1
 fi
 
+## edit ldap.conf file for allowing ldaps
+sudo sed -i.old "s/demand/allow/" /private/etc/openldap/ldap.conf
 
 ###### User info ######
 # Get Username
@@ -205,54 +249,54 @@ echo "set LocalHostName and HostName"
 ##
 ###### name check now done ######
 ##
+function GetOUs() {
+        OU_SelectFrom="$(ldapsearch \
+        -H ldaps://$domainIP \
+        -D ${username}@$domainFull \
+        -w ${password} \
+        -b "$1" \
+        -s one o dn \
+        | grep 'dn: OU=' \
+        | awk -F= '{ split($2,arr,","); print arr[1] }' \
+        )"
+}
 
 n=1
-## repeat??
 while [[ $n -ne 3 ]]
 do
-#### Dropdowns for which OU to join to
-## OU's under $main ou
-## OU_UserGroup - our user groups are based off of the OU name. 
-## If you don't need admin, can go ahead and delete these references.
-AD_OUs="$(ldapsearch \
-    -H ldap://$domainFull \
-    -D ${username}@$domainFull \
-    -w ${password} \
-    -b "$DomainC" \
-    -s one o dn \
-    | grep 'dn: OU=' \
-    | awk -F= '{ split($2,arr,","); print arr[1] }' \
-)"
+#### Which OU to join to?
+# initial set
+OU_Search="$DomainC"
+while [[ -z $OU_SelectFrom ]]
+do
+    IPGET
+    GetOUs $OU_Search
+done
 
 # Ask which main OU you want to join
 OU_OneFull="$($CocoaD \
     standard-dropdown \
     --title "Main OU" \
     --text "Select a main OU to join" \
-    --items $AD_OUs \
+    --items $OU_SelectFrom \
     --float \
     --no-cancel \
     --string-output \
 )"
 OU_One=${OU_OneFull:3}
+OU_Search="ou=$OU_One,$OU_Search"
 
 ## OU's under $OU_One 
 # curently looks 4 deep. 
 # If more are needed, need another if statement
-AD_Two_OUs="$(ldapsearch \
-        -H ldap://$domainFull \
-        -D ${username}@$domainFull \
-        -w ${password} \
-        -b "ou=$OU_One,$DomainC" \
-        -s one o dn \
-        | grep 'dn: OU=' \
-        | awk -F= '{ split($2,arr,","); print arr[1] }' \
-)"
+GetOUs $OU_Search
+AD_Two_OUs=$OU_SelectFrom
 
 ## Begin mining the depths ############## if 1
 if [ -z "$AD_Two_OUs" ]; then
     echo "OUs parsed"
     OU_JoinFinal="ou=$OU_One,$DomainC"
+    echo "$OU_JoinFinal is selection"
     OU_UserGroup="$OU_One"
 else
     # Ask which OU (sub $OU_One) you want to join
@@ -263,31 +307,27 @@ else
         standard-dropdown \
         --title "AnOUther OU" \
         --text "Select a sub OU to join" \
-        --items $AD_Two_OUs \
+        --items $OU_SelectFrom \
         --float \
         --string-output \
         --no-cancel \
     )"
     OU_Two=${OU_TwoFull:3}
+    OU_Search="ou=$OU_Two,$OU_Search"
     
     # Check next level
-    AD_Three_OUs="$(ldapsearch \
-        -H ldap://$domainFull \
-        -D ${username}@$domainFull \
-        -w ${password} \
-        -b "ou=$OU_Two,ou=$OU_One,$DomainC" \
-        -s one o dn \
-        | grep 'dn: OU=' \
-        | awk -F= '{ split($2,arr,","); print arr[1] }' \
-    )"
+    GetOUs $OU_Search
+    AD_Three_OUs=$OU_SelectFrom
     # next ############## if 2
     if [ -z "$AD_Three_OUs" ]; then
         echo "OUs parsed"
         if [[ "$OU_One" == "$OU_Two" ]]; then
             OU_JoinFinal="ou=$OU_One,$DomainC"
+            echo "$OU_JoinFinal is selection"
             OU_UserGroup="$OU_One"
         else
             OU_JoinFinal="ou=$OU_Two,ou=$OU_One,$DomainC"
+            echo "$OU_JoinFinal is selection"
             OU_UserGroup="$OU_Two"
         fi
     else
@@ -299,31 +339,27 @@ else
             standard-dropdown \
             --title "S[OU]b-day fun-day" \
             --text "Don't go too deep, you'll awaken the Balrog" \
-            --items $AD_Three_OUs \
+            --items $OU_SelectFrom \
             --float \
             --string-output \
             --no-cancel \
         )"
         OU_Three=${OU_ThreeFull:3}
+        OU_Search="ou=$OU_Three,$OU_Search"
         
-        # We have to go deeper ############## if 3
-        AD_Four_OUs="$(ldapsearch \
-            -H ldap://$domainFull \
-            -D ${username}@$domainFull \
-            -w ${password} \
-            -b "ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC" \
-            -s one o dn \
-            | grep 'dn: OU=' \
-            | awk -F= '{ split($2,arr,","); print arr[1] }' \
-        )"
+        # We have to go deeper ##############
+        GetOUs $OU_Search
+        AD_Four_OUs=$OU_SelectFrom
         # how far can we go?
         if [ -z "$AD_Four_OUs" ]; then
             echo "OUs parsed"
             if [[ "$OU_Two" == "$OU_Three" ]]; then
                 OU_JoinFinal="ou=$OU_Two,ou=$OU_One,$DomainC"
+                echo "$OU_JoinFinal is selection"
                 OU_UserGroup="$OU_Two"
             else
                 OU_JoinFinal="ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                echo "$OU_JoinFinal is selection"
                 OU_UserGroup="$OU_Three"
             fi
         else
@@ -335,32 +371,28 @@ else
                 standard-dropdown \
                 --title "Durin's Bane" \
                 --text "Drums in the Deep : Khazad Dum" \
-                --items $AD_Four_OUs \
+                --items $OU_SelectFrom \
                 --float \
                 --string-output \
                 --no-cancel \
             )"
             OU_Four=${OU_FourFull:3}
+            OU_Search="ou=$OU_Four,$OU_Search"
         # we're done?
         
         # idk just another check ############## if 4
-        AD_Five_OUs="$(ldapsearch \
-            -H ldap://$domainFull \
-            -D ${username}@$domainFull \
-            -w ${password} \
-            -b "ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC" \
-            -s one o dn \
-            | grep 'dn: OU=' \
-            | awk -F= '{ split($2,arr,","); print arr[1] }' \
-        )"
+        GetOUs $OU_Search
+        AD_Five_OUs=$OU_SelectFrom
             # how far can we go?
             if [ -z "$AD_Five_OUs" ]; then
                 echo "OUs parsed"
                 if [[ "$OU_Three" == "$OU_Four" ]]; then
                     OU_JoinFinal="ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Three"
                 else
                     OU_JoinFinal="ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Four"
                 fi
             else
@@ -372,7 +404,7 @@ else
                 standard-dropdown \
                 --title "Final stand" \
                 --text "I am a servant of the secret fire, wielder of the flame of Anor. You cannot pass. The dark fire will not avail you, flame of Udûn. Go back to the Shadow! You cannot pass." \
-                --items $AD_Five_OUs \
+                --items $OU_SelectFrom \
                 --float \
                 --string-output \
                 --no-cancel \
@@ -381,24 +413,26 @@ else
             # MAKE IT STOP ############## if done
                 if [[ "$OU_Four" == "$OU_Five" ]]; then
                     OU_JoinFinal="ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Four"
                 else
                     OU_JoinFinal="ou=$OU_Five,ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Five"
                 fi
             fi
         fi
     fi
 fi
+
 # Make $OU_JoinFinal readable
 niceOU_Join="$(echo $OU_JoinFinal | sed -e 's/ou=//g;s/,dc=/./g')"
 
 ## Make sure this choice is correct
 OU_Check="$($CocoaD \
     yesno-msgbox \
-    --title "Confirm Selection" \
-    --text "Please Choose:" \
-    --informative-text "You are attempting to join $computerName to the following location: $niceOU_Join : is this correct?" \
+    --text "Confirm Selection" \
+    --informative-text "You are attempting to join $computerName to the following location: $niceOU_Join is this correct?" \
     --float \
     )"
     
@@ -408,7 +442,7 @@ elif [[ $OU_Check -eq 2 ]]; then
     n=2
     echo "play that song one more time!"
 elif [[ $OU_Check -eq 3 ]]; then
-    exit 1
+    exit 0
     echo "cancelling script"
 fi
 done 
@@ -416,35 +450,6 @@ done
 ##
 ####### Bind to AD #######
 ##
-# something needed for how our user groups are set up
-if [[ "$OU_One" =~ "group 1" ]] || [[ "$OU_One" =~ "group 2" ]]; then
-    echo "Not group 3, user group will be $domain\\$OU_One.OUusers"
-    Ask_User="$OU_One"
-else
-    echo "group 3, user group will be $domain\\$OU_UserGroup.OUusers"
-    Ask_User="$OU_UserGroup"
-fi
-    
-
-# ask if you want to add the users in $OU_One as an admin
-groupAdmin_Check="$($CocoaD \
-    yesno-msgbox \
-    --title "Add Users as Admin?" \
-    --text "Please Choose:" \
-    --informative-text "Do you want the users in $Ask_User to have admin access?" \
-    --float \
-    --no-cancel \
-)"
-if [[ "$groupAdmin_Check" -eq 1 ]]; then
-    echo "$username selected to allow users in $Ask_User to be admins"
-    userAdmin="$domain\\$Ask_User.OUusers"
-else
-    echo "$username selected to not allow users in $Ask_User to be admins"
-    userAdmin=""
-fi
-
-# set admin groups
-groupAdmin="$domain\\$OU_One.OUAdmins"
 
 # bind to AD
 dsconfigad \
@@ -456,6 +461,7 @@ dsconfigad \
     -mobile enable \
     -mobileconfirm disable \
     -ou "$OU_JoinFinal" \
+    -passinterval 180 \
     -preferred "$domainPreferred" \
     -nogroups \
     -groups "$groupAdmin","$userAdmin" \
@@ -468,17 +474,32 @@ dscl /Search -append / CSPSearchPath "/Active Directory/$domain/$domainFull"
 dscl /Search/Contacts -delete / CSPSearchPath "/Active Directory/$domain/All Domains"
 dscl /Search/Contacts -append / CSPSearchPath "/Active Directory/$domain/$domainFull"
 
-
 ###### Finished. Success! ######
-## New check against AD
+## 
 nameCheck="$(dsconfigad -show | awk '/Computer Account/ {print $NF}')"
 adminCheck="$(dsconfigad -show | awk '/admin groups/ {print $NF}')"
 domainCheck="$(dsconfigad -show | awk '/Directory Domain/ {print $NF}')"
 
-$CocoaD \
-    msgbox \
-    --title "Success!" \
-    --text "New AD info:" \
-    --informative-text "This computer, $nameCheck, has been bound to $domainCheck. Groups able to administer are $adminCheck" \
-    --button1 "That was easy"
+if [[ -z $nameCheck ]]; then
+    $CocoaD \
+        msgbox \
+        --text "Error" \
+        --informative-text "Something went wrong. Please run the policy Bind to AD again. If you continue to have issues, please contact an admin." \
+        --button1 "OK" \
+        --float
+    # echo output
+    echo "Failure to bind. Try again."
+else
+    $CocoaD \
+        msgbox \
+        --text "Success!" \
+        --informative-text "This computer, $nameCheck, has been bound to $domainCheck.  Groups able to administer are $adminCheck" \
+        --button1 "That was easy" \
+        --float
+    # echo output
+    echo "$nameCheck has been bound to $domainCheck in $niceOU_Join"
+fi
+
+$jamfBin recon &
+    
 exit 0
