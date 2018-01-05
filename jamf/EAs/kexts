@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# jjourney 01/2018 - api stuff
+# all kext stuff from @franton / Richard Purves
+# richard at richard - purves dot com
+# http://www.richard-purves.com/2017/11/09/mdm-and-the-kextpocalypse-2/
+
+# Function to decrypt the string
+function DecryptString() {
+    # Usage: ~$ DecryptString "Encrypted String" "Salt" "Passphrase"
+    echo "${1}" | /usr/bin/openssl enc -aes256 -d -a -A -S "${2}" -k "${3}"
+}
+
+# Decrypt password
+apiUser=""
+apiPass=""
+
+# API URL
+apiURL="jss.company.com:8443"
+
+# hardware info for API
+udid=$(/usr/sbin/system_profiler SPHardwareDataType | /usr/bin/awk '/Hardware UUID:/ { print $3 }')
+
+# Stop IFS linesplitting on spaces
+OIFS=$IFS
+IFS=$'\n'
+
+# scan following folders to find 3rd party kexts
+# /Applications
+# /Library/Extensions
+# /Library/Application Support
+
+echo "Searching Applications folder"
+applic=($( find /Applications -name "*.kext" ))
+
+echo "Searching Library Extensions folder"
+libext=($( find /Library/Extensions/ -name "*.kext" -maxdepth 1 ))
+
+echo "Searching Library Application Support folder"
+libapp=($( find /Library/Application\ Support -name "*.kext" ))
+
+echo ""
+
+# merge arrays
+results=("${applic[@]}" "${libext[@]}" "${libapp[@]}")
+
+if [ ${#results[@]} != "0" ];
+then
+    for (( loop=0; loop<${#results[@]}; loop++ ))
+    do
+        # get Dev ID + team ID for the kext
+        exec=$( codesign -d -vvvv ${results[$loop]} 2>&1 | grep "Executable=" | awk -F"/" '{print $NF}' )
+        # teamid=$( codesign -d -vvvv ${results[$loop]} 2>&1 | grep "Authority=Developer ID Application:" | cut -d ":" -f2 |tr -d " " )
+        teamid=$( codesign -d -vvvv ${results[$loop]} 2>&1 | grep "Authority=Developer ID Application:" | cut -d"(" -f2 | tr -d ")" )
+
+        # get cfbundleidentifier for the kext
+        bundid=$( defaults read "${results[$loop]}"/Contents/Info.plist CFBundleIdentifier )
+        
+        echo "Executable: $exec Team ID: $teamid Bundle ID: $bundid"
+        list+="${exec} ${teamid} ${bundid}"
+        list+=$'\n'
+    done
+fi
+
+IFS=$OIFS
+
+xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attributes><extension_attribute><name>kexts</name><value>$list</value></extension_attribute></extension_attributes></computer>"
+
+# Identify the location of the jamf binary for the jamf_binary variable.
+CheckBinary (){
+# Identify location of jamf binary.
+jamf_binary=$(/usr/bin/which jamf)
+
+if [[ "$jamf_binary" == "" ]] && [[ -e "/usr/sbin/jamf" ]] && [[ ! -e "/usr/local/bin/jamf" ]]; then
+jamf_binary="/usr/sbin/jamf"
+elif [[ "$jamf_binary" == "" ]] && [[ ! -e "/usr/sbin/jamf" ]] && [[ -e "/usr/local/bin/jamf" ]]; then
+jamf_binary="/usr/local/bin/jamf"
+elif [[ "$jamf_binary" == "" ]] && [[ -e "/usr/sbin/jamf" ]] && [[ -e "/usr/local/bin/jamf" ]]; then
+jamf_binary="/usr/local/bin/jamf"
+fi
+}
+# Update the kext Extention Attribute
+UpdateAPI (){
+/usr/bin/curl \
+    -s \
+    -u ${apiUser}:${apiPass} \
+    -X PUT \
+    -H "Content-Type: text/xml" \
+    -d "${xmlString}" "${apiURL}/JSSResource/computers/udid/$udid"
+}
+
+CheckBinary
+UpdateAPI
+
+exit
