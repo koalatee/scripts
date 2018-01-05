@@ -5,23 +5,8 @@
 # richard at richard - purves dot com
 # http://www.richard-purves.com/2017/11/09/mdm-and-the-kextpocalypse-2/
 
-# Function to decrypt the string
-function DecryptString() {
-    # Usage: ~$ DecryptString "Encrypted String" "Salt" "Passphrase"
-    echo "${1}" | /usr/bin/openssl enc -aes256 -d -a -A -S "${2}" -k "${3}"
-}
-
-# Decrypt password
-apiUser=""
-apiPass=""
-
-# API URL
-apiURL="jss.company.com:8443"
-# name of the EA 
-ea_name=""
-
-# hardware info for API
-udid=$(/usr/sbin/system_profiler SPHardwareDataType | /usr/bin/awk '/Hardware UUID:/ { print $3 }')
+# I have this set as a policy that runs 1x/mo so it's not overloading. 
+# If you want it to be an actual EA, go to line 54ish and read there
 
 # Stop IFS linesplitting on spaces
 OIFS=$IFS
@@ -66,6 +51,27 @@ fi
 
 IFS=$OIFS
 
+### API write only below. Uncomment out result line below and delete everything under if you want it to be an EA
+# echo "<result>$list</result>"
+
+# Function to decrypt the string
+function DecryptString() {
+    # Usage: ~$ DecryptString "Encrypted String" "Salt" "Passphrase"
+    echo "${1}" | /usr/bin/openssl enc -aes256 -d -a -A -S "${2}" -k "${3}"
+}
+
+# Decrypt password
+apiUser=""
+apiPass=""
+
+# API URL
+apiURL="jss.company.com:8443"
+# name of the EA 
+ea_name=""
+
+# hardware info for API
+udid=$(/usr/sbin/system_profiler SPHardwareDataType | /usr/bin/awk '/Hardware UUID:/ { print $3 }')
+
 xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attributes><extension_attribute><name>$ea_name</name><value>$list</value></extension_attribute></extension_attributes></computer>"
 
 # Identify the location of the jamf binary for the jamf_binary variable.
@@ -81,7 +87,8 @@ elif [[ "$jamf_binary" == "" ]] && [[ -e "/usr/sbin/jamf" ]] && [[ -e "/usr/loca
 jamf_binary="/usr/local/bin/jamf"
 fi
 }
-# Update the kext Extention Attribute
+
+# Update the $ea_name Extention Attribute
 UpdateAPI (){
 /usr/bin/curl \
     -s \
