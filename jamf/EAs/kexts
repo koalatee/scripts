@@ -8,6 +8,11 @@
 # I have this set as a policy that runs 1x/mo so it's not overloading. 
 # If you want it to be an actual EA, go to line 54ish and read there
 
+# skip kexts for reporting in jamf
+# once a kext has been identified as approved and added to whitelist profile, add it to this variable and it will not be reported any longer
+# use the teamid
+skips=()
+
 # Stop IFS linesplitting on spaces
 OIFS=$IFS
 IFS=$'\n'
@@ -44,8 +49,12 @@ then
         bundid=$( defaults read "${results[$loop]}"/Contents/Info.plist CFBundleIdentifier )
         
         echo "Executable: $exec Team ID: $teamid Bundle ID: $bundid"
-        list+="${exec} ${teamid} ${bundid}"
-        list+=$'\n'
+        if [[ ${skips[@]} =~ $teamid ]]; then
+            echo "*** Skipping Team ID: $teamid (Bundle ID: $bundid) as it is in skips ***"
+        else
+            list+="${exec} ${teamid} ${bundid}"
+            list+=$'\n'
+        fi
     done
 fi
 
