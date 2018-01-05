@@ -17,6 +17,8 @@ apiPass=""
 
 # API URL
 apiURL="jss.company.com:8443"
+# name of the EA 
+ea_name=""
 
 # hardware info for API
 udid=$(/usr/sbin/system_profiler SPHardwareDataType | /usr/bin/awk '/Hardware UUID:/ { print $3 }')
@@ -64,7 +66,7 @@ fi
 
 IFS=$OIFS
 
-xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attributes><extension_attribute><name>kexts</name><value>$list</value></extension_attribute></extension_attributes></computer>"
+xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attributes><extension_attribute><name>$ea_name</name><value>$list</value></extension_attribute></extension_attributes></computer>"
 
 # Identify the location of the jamf binary for the jamf_binary variable.
 CheckBinary (){
