@@ -2,11 +2,6 @@
 # jjourney 09/2016
 # single button to install apps, lets you choose what apps you want to install
 # Forces some apps
-# Eventually this will be re-written in swift with an app
-
-## Update 12/6/2016 
-# macs that were re-imaging were having issues with the cert chain, preventing them from managing or having valid API call. 
-# Forcing the enrMacsCert trigger and a jamf manage before anything else.
 
 # variables
 jamfBin="/usr/local/jamf/bin/jamf"
@@ -57,42 +52,36 @@ fi
 ### triggers
 ### If you want to add more policies, create a new policy with 'Custom' Trigger and trigger name 'enr%identifier%'
 
-## The following 2 run early to account for issues with re-images 
-"$jamfBin" policy -trigger enrCompMacsCert
-"$jamfBin" manage
-
 # Enter possible choices below. Names must be in order with the trigger_choose
-jamfTrigger_Choose=(enrDropboxInstall \
-        enrFireFoxInstall \
-        enrChromeInstall \
-        enrOffice2016InstallNew \
-        enrReaderInstall \
-        enrVPNInstall \
+jamfTrigger_Choose=(trigger1 \
+        trigger2 \
+        trigger3 \
+        trigger4 \
+        trigger5 \
+        trigger6 \
         )
-jamfApp_Choose=(Dropbox \
-        Firefox \
-        Chrome \
-        "Office 2016" \
-        "Reader DC" \
-        "Cisco VPN" \
+jamfApp_Choose=(trigger_1_friendly_name \
+        trigger_2_friendly_name \
+        trigger_3_friendly_name \
+        trigger_4_friendly_name \
+        trigger_5_friendly_name \
+        trigger_6_friendly_name \
         )
 
 ## Enter forced policies below. Names must match up with the trigger_force
 # Excludes "Change location in JSS" and "rename and bind" as that happens at the end, it is just listed here for information
 # New Forced triggers must be listed above "Change location in JSS"/"enrChangeLocation"
-jamfTrigger_Force=(enrCasperCheckInstall \
-        enrAvastSecurity \
-        enrBomgar \
-        enrFileVault2Auth \
+jamfTrigger_Force=(forcetrigger1 \
+        forcetrigger2 \
+        forcetrigger3 \
+        forcetrigger4 \
         )
-jamfApp_Force=(CasperCheck \
-        "Avast Antivirus" \
-        "Bomgar Remote Support" \
-        "File-Vault 2 auto-auth" \
-        "Add admin account" \
-        "Change location in JSS" \
-        "Rename and Bind" \
-        "Start Encryption" \
+jamfApp_Force=(forcetrigger1_friendly_name \
+        forcetrigger2_friendly_name \
+        forcetrigger3_friendly_name \
+        forcetrigger4_friendly_name \
+        forcetrigger5_friendly_name \
+        forcetrigger6_friendly_name \
         )
 
 # Define total array
@@ -138,11 +127,6 @@ $CocoaD \
     
 # Run Recon
 $jamfBin recon
-
-echo ""
-echo "\\============ Location, Name and Binding ================\\"
-# Bind machine
-$jamfBin policy -trigger "$bind_trigger"
 
 echo ""
 echo "\\============ App Installation ================\\"
