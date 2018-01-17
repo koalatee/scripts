@@ -6,18 +6,15 @@
 # variables
 jamfBin="/usr/local/jamf/bin/jamf"
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
-CocoaD="/Library/RTS/CD/CocoaDialog3.app/Contents/MacOS/CocoaDialog"
-# these are triggered at the end, after a recon
-location_trigger="enrRenameMac"
-bind_trigger="enrBindMachine"
-encrypt_trigger="enrAutoEncryption"
+CocoaD="/Path/to/CD/CocoaDialog3.app/Contents/MacOS/CocoaDialog"
+# I have these are triggered at the end, after a recon
+bind_trigger=""
+encrypt_trigger=""
 
 # JSS triggers
-CD3_trigger="polCocoaDialog3"
-CD2_trigger="polCocoaDialog"
+CD3_trigger=""
 
 $jamfBin policy -trigger "$CD3_trigger"
-$jamfBin policy -trigger "$CD2_trigger"
 
 ###### Exit if CD not found ######
 # Will try and download Cocoa Dialog policy with trigger listed
