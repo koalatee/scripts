@@ -48,10 +48,10 @@ then
         # get cfbundleidentifier for the kext
         bundid=$( defaults read "${results[$loop]}"/Contents/Info.plist CFBundleIdentifier )
         
-        echo "Executable: $exec Team ID: $teamid Bundle ID: $bundid"
         if [[ ${skips[@]} =~ $teamid ]]; then
             echo "*** Skipping Team ID: $teamid (Bundle ID: $bundid) as it is in skips ***"
         else
+            echo "Executable: $exec Team ID: $teamid Bundle ID: $bundid"
             list+="${exec} ${teamid} ${bundid}"
             list+=$'\n'
         fi
