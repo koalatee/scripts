@@ -9,12 +9,14 @@
 
 #### jamf variables
 # full installer variables
-# See line 32 for naming, this assumes you have a pkg named Office2016-$currentVersion
+# See line 34 for naming, this assumes you have a pkg named Office2016-$currentVersion
 # Example: Office2016-15.40.pkg
+# You want 2 have one policy for 'caching' and another for 'install cached'
 fulltriggercache="polOfficeUpdateScriptCache"
 fulltriggerinstall="polOfficeUpdateScriptInstall"
 
 # individual installer variables
+# You will want 6 policies, correspond each trigger with the policy
 exceltriggerinstall="polExcelInstall"
 wordtriggerinstall="polWordInstall"
 ppttriggerinstall="polPPTInstall"
