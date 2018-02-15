@@ -6,7 +6,7 @@
 # http://www.richard-purves.com/2017/11/09/mdm-and-the-kextpocalypse-2/
 
 # I have this set as a policy that runs 1x/mo so it's not overloading. 
-# If you want it to be an actual EA, go to line 54ish and read there
+# If you want it to be an actual EA, go to line 63ish and edit there
 
 # skip kexts for reporting in jamf
 # once a kext has been identified as approved and added to whitelist profile, add it to this variable and it will not be reported any longer
