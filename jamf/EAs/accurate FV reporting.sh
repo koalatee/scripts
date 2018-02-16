@@ -63,7 +63,7 @@ FVON="Filevault is On."
 FVOFF="Filevault is Off."
 FVPROGRESS="Encryption in progress:"
 FVDEGRESS="Decryption in progress:"
-FVDECRYPTED="Filevault if Off."
+FVDECRYPTED="Filevault is Off."
 FVNA="Filevault unavailable"
 FVVM="No CoreStorage, probably VM"
 
