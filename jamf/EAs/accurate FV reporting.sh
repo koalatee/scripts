@@ -20,6 +20,7 @@
 #                  Setup: Input your jamf address for "apiURL"
 #                         Input the EA name for "ea_name"
 #                         Smart groups can be used for each EA value/message
+#			  Enter string decryption for $apiUser and $apiPass
 #
 ###
 
@@ -30,8 +31,8 @@ function DecryptString() {
 }
 
 # Decrypt password
-apiUser=$(DecryptString $4 '03a49bc11d67608c' '11b9ec057f88069ab643816b')
-apiPass=$(DecryptString $5 '9183a4a510332d53' 'a41775e19fc4f189f2e206dd')
+apiUser=$(DecryptString $4 '' '')
+apiPass=$(DecryptString $5 '' '')
 
 # API URL
 apiURL=""
