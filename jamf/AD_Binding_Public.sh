@@ -3,6 +3,10 @@
 #
 # Binding to AD
 # jjourney 07/2016
+# 
+# Update: 2/2018
+# This is fairly specific to my environment, but the shell could be used. 
+# Working on simplifying with functions, but it's proving difficult...
 #
 # Per the $DomainC, this only searches within the $main OU
 # For each OU, it looks if there are sub-OUs and asks which you want to join
@@ -79,35 +83,8 @@ delete+=($domainIP) # if one fails, it won't try it again
 echo "using $domainIP"
 }
 
-###### Exit if CD not found ######
 # Will try and download Cocoa Dialog policy with trigger listed
 $jamfBin policy -trigger "$CD2_trigger"
-# loop
-i=1
-while [[ ! -f "$CocoaD" ]] && [[ $i -ne 4 ]]
-do
-    "$jamfHelper" \
-        -windowType hud \
-        -alignDescription center \
-        -title "Error" \
-        -description "Dependencies needed for the script not found with install. This is try number $i to download dependencies..." \
-        -lockHUD \
-        -timeout 10 \
-        -countdown
-    $jamfBin policy -trigger "$CD2_trigger"
-    i=$(( $i + 1 ))
-done
-
-if [[ $i -eq 4 ]]; then
-    "$jamfHelper" \
-        -windowType hud \
-        -alignDescription center \
-        -title "Error" \
-        -description "Dependencies not able to be downloaded. Please contact your administrator" \
-        -button1 "OK" \
-        -lockHUD
-    exit 1
-fi
 
 ## edit ldap.conf file for allowing ldaps
 sudo sed -i.old "s/demand/allow/" /private/etc/openldap/ldap.conf
