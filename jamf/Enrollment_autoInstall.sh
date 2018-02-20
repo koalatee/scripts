@@ -1,7 +1,18 @@
 #!/bin/sh  
 # jjourney 09/2016
 # single button to install apps, lets you choose what apps you want to install
-# Forces some apps
+# Option to force some apps
+
+### Setup:
+# 
+# setup policies with ongoing custom triggers
+# input triggers as desired
+# jamfTrigger_Choose = input triggers as desired, these are selectable
+# jamfApp_Choose = friendly name to match up triggers above (for user display)
+# jamfTrigger_Force = input triggers as desired, these are forced
+# jamfApp_Force = friendly name to match up forced policies (for user display)
+#
+###
 
 # variables
 jamfBin="/usr/local/jamf/bin/jamf"
@@ -15,36 +26,6 @@ encrypt_trigger=""
 CD3_trigger=""
 
 $jamfBin policy -trigger "$CD3_trigger"
-
-###### Exit if CD not found ######
-# Will try and download Cocoa Dialog policy with trigger listed
-# loop
-i=1
-while [[ ! -f "$CocoaD" ]] && [[ $i -ne 4 ]]
-do
-    "$jamfHelper" \
-        -windowType hud \
-        -alignDescription center \
-        -title "Error" \
-        -description "Dependencies for the rest of this script not found with install. This is try number $i to download dependencies..." \
-        -lockHUD \
-        -timeout 10 \
-        -countdown
-    $jamfBin policy -trigger "$CD3_trigger"
-    i=$(( $i + 1 ))
-    echo "trying to download"
-done
-
-if [[ $i -eq 4 ]]; then
-    "$jamfHelper" \
-        -windowType hud \
-        -alignDescription center \
-        -title "Error" \
-        -description "Dependencies not able to be downloaded. Please contact your administrator" \
-        -button1 "OK" \
-        -lockHUD
-    exit 1
-fi
 
 ### triggers
 ### If you want to add more policies, create a new policy with 'Custom' Trigger and trigger name 'enr%identifier%'
