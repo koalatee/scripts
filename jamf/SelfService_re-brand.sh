@@ -2,9 +2,17 @@
 # jjourney (@koalatee) 07/2016
 # Changes name and icns of Self Service.app
 # Assumes files are on desktop of logged in user
+# 
+# 2/2018 
+# This is deprecated with jamf 10 branding support
 
+### Setup information:
 # Need to already have created .icns files with $newName - see:
 # https://developer.apple.com/library/mac/documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/Optimizing/Optimizing.html
+# Files go on desktop
+# 
+# Input newName
+# Once complete, package in composer
 
 # user (for location)
 loggedInUser=$(python -c 'from SystemConfiguration import SCDynamicStoreCopyConsoleUser; import sys; username = (SCDynamicStoreCopyConsoleUser(None, None, None) or [None])[0]; username = [username,""][username in [u"loginwindow", None, u""]]; sys.stdout.write(username + "\n");')
@@ -15,10 +23,10 @@ jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/
 
 # App Name
 newName=""
-# Location of files
-workingLocation="/Users/$loggedInUser/Desktop"
 # information only for error messages
 icnFileLocation=""
+# Location of files
+workingLocation="/Users/$loggedInUser/Desktop"
 
 # file locations
 ogSelfService="$workingLocation/Self Service.app"
