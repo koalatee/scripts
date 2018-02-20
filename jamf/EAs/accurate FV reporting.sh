@@ -31,6 +31,7 @@ function DecryptString() {
 }
 
 # Decrypt password
+# Add salt + passphrase for each, see encrypted strings link above
 apiUser=$(DecryptString $4 '' '')
 apiPass=$(DecryptString $5 '' '')
 
@@ -66,9 +67,6 @@ FVDEGRESS="Decryption in progress:"
 FVDECRYPTED="Filevault is Off."
 FVNA="Filevault unavailable"
 FVVM="No CoreStorage, probably VM"
-
-ENCRYPTSTATUS="/private/tmp/encrypt_status.txt"
-ENCRYPTDIRECTION="/private/tmp/encrypt_direction.txt"
 
 # OS info
 osvers_major=$(sw_vers -productVersion | awk -F. '{print $1}')
@@ -213,20 +211,6 @@ elif [[ ${osvers_major} -eq 10 ]] && [[ ${osvers_minor} -ge 13 ]] && [[ "$boot_f
     fi
 else
     result="FV2 status: error"
-fi
-
-# Remove the temp files created during the script
-
-if [ -f "$CORESTORAGESTATUS" ]; then
-   rm -f "$CORESTORAGESTATUS"
-fi
-
-if [ -f "$ENCRYPTSTATUS" ]; then
-   rm -f "$ENCRYPTSTATUS"
-fi
-
-if [ -f "$ENCRYPTDIRECTION" ]; then
-   rm -f "$ENCRYPTDIRECTION"
 fi
 
 xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attributes><extension_attribute><name>$ea_name</name><value>$result</value></extension_attribute></extension_attributes></computer>"
