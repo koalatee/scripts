@@ -95,7 +95,6 @@ computerName_prompt="$($CocoaD \
 if [ "$computerName_prompt" -eq 1 ]; then
     oldName="$(curl \
         -s \
-        -v \
         -u $username:"$password" \
         -X GET $jss/JSSResource/computers/serialnumber/$serialNumber \
         -H "Accept: application/xml" \
@@ -158,7 +157,6 @@ if [ "$computerName_prompt" -eq 1 ]; then
         # Final PUT command, updating new Name
         curl \
             -s \
-            -v \
             -u \
             $username:"$password" \
             -X PUT \
@@ -174,7 +172,6 @@ if [ "$computerName_prompt" -eq 1 ]; then
         # New Check
         checkName="$(curl \
             -s \
-            -v \
             -u $username:"$password" \
             -X GET $jss/JSSResource/computers/serialnumber/$serialNumber \
             -H "Accept: application/xml" \
