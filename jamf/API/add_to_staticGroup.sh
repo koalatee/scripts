@@ -3,7 +3,7 @@
 ##### Variables #####
 jamfURL="your.jamf.here:8443"
 serialNumber="$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')"
-groupID="" # static group ID here
+groupID="${6}" # static group ID here, or as parameter 6 in jamf script
 
 ## Function for api account string decryption
 ## https://github.com/jamfit/Encrypted-Script-Parameters
