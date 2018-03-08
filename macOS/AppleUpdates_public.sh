@@ -15,6 +15,11 @@
 # automatically installed. The user is then prompted for ones that require a restart. Installs by name so 
 # the delay between pressing the 'restart now' button and the actual restart is much quicker.
 
+##### README #####
+# pkg the script up, deploy, and then start the script 
+# This script is meant to live on a user's machine - it will create LDs to for deferral or checking every 2 weeks
+#####
+
 # Logging location
 log_location="/var/log/appleUpdater.log"
 ScriptLogging(){
