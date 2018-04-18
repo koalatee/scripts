@@ -1,9 +1,17 @@
 #!/bin/bash
 
 ##### Variables #####
+# setup
+# upload script to jamf
+# set parameters:
+# 4 = apiUser Encrypted String
+# 5 = apiPass Encrypted String
+# 6 = static group ID# 
+# attach to a policy and fill in respective values
+
 jamfURL="your.jamf.here:8443"
 serialNumber="$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')"
-groupID="${6}" # static group ID here, or as parameter 6 in jamf script
+groupID="${6}" 
 
 ## Function for api account string decryption
 ## https://github.com/jamfit/Encrypted-Script-Parameters
