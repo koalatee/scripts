@@ -42,9 +42,6 @@
 # removes problematic ones, should cut down on time 
 #
 # UPDATE 06/2018
-# adding GIOS as an option
-#
-# UPDATE 06/2018
 # removed cocoa dialog, all applescript
 # condensed code, more functions, more readable??
 # leave preserves OU location and groups for immediate rebind
