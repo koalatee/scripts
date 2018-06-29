@@ -3,12 +3,9 @@
 #
 # Binding to AD
 # jjourney 07/2016
-# 
-# Update: 2/2018
-# This is fairly specific to my environment, but the shell could be used. 
-# Working on simplifying with functions, but it's proving difficult...
 #
-# Per the $DomainC, this only searches within the $main OU
+# Lets you drill down what OU you want to join a mac to
+# First choices are listed below in $OU_choices
 # For each OU, it looks if there are sub-OUs and asks which you want to join
 # User is prompted to rename the machine if they want, which will also scutil --set LocalHostName and HostName
 # 
@@ -23,9 +20,6 @@
 # UPDATE 11/2/2016
 # Now shows an error message if binding did not happen
 #
-# UPDATE 12/6/2016
-# Now checks for a dummy receipt for the 'auto Install Applications' and if not, asks if the user wants to add the 802.1x profile
-# Saying 'yes' will download the pkg/receipt and the user will be added to a Smart Group that gets the 802.1x profile
 #
 # UPDATE 6/9/2017
 # Set the password policy to 180 days, from 45
@@ -35,41 +29,103 @@
 # TLS_REQCERT demand to TLS_REQCERT allow
 # changed all ldap:// to ldaps://
 #
+# UPDATE 11/27/2017
+# changed domain preferred from
+#
 # UPDATE 12/6/2017
 # automatically add the autoinstallreceipt.pkg for 802.1x profile
 # commented out old ? (end of script)
 #
 # UPDATE 12/11/2017
-# ldapsearch now queries against IP instead of FQDN
-# IPGET checks all IPs against $domainFull
+# ldapsearch now queries against IP
+# IPGET checks all IPs against 
 # removes problematic ones, should cut down on time 
+#
+# UPDATE 06/2018
+# adding GIOS as an option
+#
+# UPDATE 06/2018
+# removed cocoa dialog, all applescript
+# condensed code, more functions, more readable??
+# leave preserves OU location and groups for immediate rebind
 
 ###### Variables ######
 # System
-CocoaD="" # cocoa dialog binary location
 computerName="$(scutil --get ComputerName)"
 serialNumber="$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')"
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 jamfBin="/usr/local/jamf/bin/jamf"
+wifiJAMFreceipt="" # <-- used in our environment as we're slowly bringing macs on the domain and they need to have 802.1x profile
 
-# JSS
-jss=""
-CD2_trigger=""
-rename_trigger=""
-forceName_trigger=""
+# jamf
+jamf="" # <-- input jamf URL here (used for calling another script to change name)
+rename_trigger="" # <-- trigger for said name change 
+forceName_trigger="" # <-- trigger to force jamf name down to mac
 
 ## AD variables 
-adUser="" # user (should be a service account) to do some checks
-domain="" # short name for domain (for user input)
-domainFull="" # your.domain.here
-DomainC="ou=$OU_main,dc=$dc_info_here" # where do you want to start looking?
-domainPreferred="" # what DC do you want to be preferred
-userAdmin="$domain\\$user_group_name" # do you want a user group to have admin rights
-groupAdmin="$domain\\$IT_group_name" # do you want an IT/admin group to have admin rights
+adUser="" # <-- checks to see if it can find this user to help make sure machine is bound
+domain="" # <-- shortname of domain
+domainFull="" # <-- fullname of domain
+domainPreferred="" # <-- for final binding command
+DomainCSuffix="" # <-- used to create $DomainC, want in format dc=company,dc=com
+OU_choices="" # these are the OUs you want to choose from in the beginning
 
-## Get IP of domain and select one 
-# add any problem IPs into the delete array below
+## IPGET IP addresses to ignore
+# problem IP addresses with ldapsearch, due to round-robin/load balancer/etc
+# add any more problem ones into the delete array (below)
 delete=()
+
+# applescript
+#
+# template:
+########### Title - "$2" ############
+#                                   #
+#     Text to display - "$1"        #
+#                                   #
+#      [Default response - "$5"]    #
+#                                   #
+#               (B1 "$3") (B2 "$4") # <- Button 2 default
+#####################################
+
+function simpleInput() {
+osascript <<EOT
+tell app "System Events"
+text returned of (display dialog "$1" default answer "$5" buttons {"$3", "$4"} default button 2 with title "$2")
+end tell
+EOT
+}
+
+function hiddenInput() {
+osascript <<EOT
+tell app "System Events" 
+text returned of (display dialog "$1" with hidden answer default answer "" buttons {"$3", "$4"} default button 2 with title "$2")
+end tell
+EOT
+}
+
+function 1ButtonInfoBox() {
+osascript <<EOT
+tell app "System Events"
+button returned of (display dialog "$1" buttons {"$3"} default button 1 with title "$2")
+end tell
+EOT
+}
+
+function 2ButtonInfoBox() {
+osascript <<EOT
+tell app "System Events"
+button returned of (display dialog "$1" buttons {"$3", "$4"} default button 2 with title "$2")
+end tell
+EOT
+}
+
+function listChoice() {
+osascript <<EOT
+tell app "System Events"
+choose from list every paragraph of "$5" default items "None" with title "$2" with prompt "$1" OK button name "$4" cancel button name "$3"
+end tell
+EOT
+}
 
 function IPGET() {
 domainIPall=($(dig +short $domainFull))
@@ -83,53 +139,52 @@ delete+=($domainIP) # if one fails, it won't try it again
 echo "using $domainIP"
 }
 
-# Will try and download Cocoa Dialog policy with trigger listed
-$jamfBin policy -trigger "$CD2_trigger"
+function LDAPlookup() {
+    ldapsearch \
+    -H ldaps://$domainIP \
+    -D ${domainID}@$domainFull \
+    -w ${password} \
+    -b "$1" \
+    -s one o dn \
+    | grep 'dn: OU=' \
+    | awk -F= '{ split($2,arr,","); print arr[1] }' 
+}
 
 ## edit ldap.conf file for allowing ldaps
 sudo sed -i.old "s/demand/allow/" /private/etc/openldap/ldap.conf
 
+rb=0 # this ensures that the user goes through the binding process
+     # if machine is already bound, and user leaves, they can skip the nonsense
+
 ###### User info ######
 # Get Username
-username_Full="$($CocoaD standard-inputbox \
-    --title "$domain ID" \
-    --informative-text "Please enter your $domain ID" \
-    --empty-text "Please type in your $domain before clicking OK." \
-    --button1 "OK" \
-    --button2 "Cancel" \
-    --float \
-    --value-required \
-    --string-output \
-)"
-if [[ "$username_Full" =~ "Cancel" ]]; then
-    exit 0
+domainID="$(simpleInput \
+    "Please enter your $domain ID before clicking OK." \
+    "$domain ID: Binding" \
+    "Cancel" \
+    "OK")"
+if [[ "$?" != 0 ]]; then
     echo "user cancelled"
+    exit 0
 fi
-username=${username_Full:3}
 
 # Get Password
-password_Full="$($CocoaD secure-inputbox \
-    --title "$domain Password" \
-    --informative-text "Please enter your $domain Password" \
-    --empty-text "Please type in your $domain Password before clicking OK." \
-    --button1 "OK" \
-    --button2 "Cancel" \
-    --float \
-    --value-required \
-    --string-output \
-)"
-if [[ "$password_Full" =~ "Cancel" ]]; then
-    exit 0
+password="$(hiddenInput \
+    "Please enter your $domain password before click OK." \
+    "$domain ID: Binding" \
+    "Cancel" \
+    "OK")"
+if [[ "$?" != 0 ]]; then
     echo "user cancelled"
+    exit 0
 fi
-password=${password_Full:3} 
 
 ##
 ###### check if machine is already bound, ask for unbind before continuing
 ##   
 Rebind_Check="$(dsconfigad -show | awk '/Active Directory Domain/{print $NF}')"
 # If the domain is correct
-if [ "$Rebind_Check" == "$domainFull" ]; then
+if [[ "$Rebind_Check" == "$domainFull" ]]; then
     # Check ID of $aduser
     id -u $adUser
     # If check is successful
@@ -137,48 +192,43 @@ if [ "$Rebind_Check" == "$domainFull" ]; then
         echo "Mac not bound to AD"
     else
         # Force re-binding to AD, -leave or -remove
+        # get this info so we can skip all the stuff later
+        AD_realName=$(dsconfigad -show | grep "Computer Account" | awk '{print $4}')
+        AD_PreviousOU=$(dscl /Search read /Computers/$AD_realName \
+            | grep dsAttrTypeNative:distinguishedName \
+            | cut -d, -f2- )
+
         AD_Plist="/Library/Preferences/OpenDirectory/Configurations/Active Directory/"
-        Rebind_Full="$($CocoaD \
-            msgbox \
-            --title "UnBind Machine" \
-            --text "Please choose:" \
-            --informative-text "This machine is already bound. Re-bind is recommended. 'Leave' will unbind before continuing and preserve the AD record; 'Remove' will unbind and delete the object from AD; 'Exit' will cancel and exit." \
-            --no-cancel \
-            --float \
-            --button1 "Leave" \
-            --button2 "Remove" \
-            --button3 "Exit" \
-        )"
-            # Chose 'No'
-            if [ "$Rebind_Full" -eq 3 ]; then
-                exit 1
+        Rebind_Full="$(2ButtonInfoBox \
+            "This machine is already bound. Re-bind is recommended. 'Leave' will unbind before continuing and preserve the AD record; 'Remove' will unbind and delete the object from AD." \
+            "Unbind Machine" \
+            "Remove" \
+            "Leave")"
             # Chose 'Remove'
-            elif [ "$Rebind_Full" -eq 2 ]; then
-                echo "$domain chose to unbind machine, delete object"
+            if [[ "$Rebind_Full" =~ "Remove" ]]; then
+                echo "$domainID chose to unbind machine, delete object"
                 dsconfigad \
                     -remove \
                     -force \
-                    -u "${username}" \
+                    -u "${domainID}" \
                     -p "${password}"
-                $CocoaD \
-                    ok-msgbox \
-                    --title "Machine Deleted" \
-                    --text "Action required" \
-                    --informative-text "The machine has been removed from AD. Please make sure you add any descriptions or join to any groups needed when re-joining." \
-                    --float \
-                    --no-cancel
+                1ButtonInfoBox \
+                    "The machine has been removed from AD. Please make sure you add any description or join to any groups needed after rejoining." \
+                    "Machine Deleted" \
+                    "OK"
                 sleep 5
                 rm -rf "$AD_Plist"
             # Chose 'Leave'
-            elif [ "$Rebind_Full" -eq 1 ]; then
-                echo "$username chose to unbind machine; keep object"
+            elif [[ "$Rebind_Full" =~ "Leave" ]]; then
+                echo "$userName chose to unbind machine; keep object"
                 dsconfigad \
                     -leave \
-                    -localuser "${username}" \
+                    -localuser "${domainID}" \
                     -localpassword "${password}"
                 sleep 15
                 rm -rf "$AD_Plist"
                 v=2
+                rb=1 # skip all the OU selection
             else 
                 echo "messed up"
                 exit 0
@@ -187,35 +237,28 @@ if [ "$Rebind_Check" == "$domainFull" ]; then
 else 
     echo "Mac not bound to AD"
 fi
-        
+
 #### make sure computer name is correct ######
-# Only change name if it is a new bind; existing bind will maintain name
+# only change it if a new bind; existing bind maintain name
 if [[ $v -eq 2 ]]; then
-$CocoaD \
-    ok-msgbox \
-    --title "Unbind complete" \
-    --text "Computer Name Set" \
-    --informative-text "The computer object still exists in AD. The name is set to $computerName and the machine will re-join its object." \
-    --float \
-    --no-cancel
-else
+1ButtonInfoBox \
+    "The computer object still exists in AD. The name is set to $computerName and the machine will re-join its object." \
+    "Unbind Complete" \
+    "OK"
+else    
 # ask if user wants to change it
-computerName_prompt="$($CocoaD \
-    yesno-msgbox \
-    --title "Change Name?" \
-    --text "Please Choose:" \
-    --informative-text "The current name is $computerName. Would you like to change it before continuing?" \
-    --float \
-    --no-cancel \
-)"
+computerName_prompt="$(2ButtonInfoBox \
+    "The current name is $computerName. Would you like to change it before continuing?" \
+    "Computer Name Change?" \
+    "No" \
+    "Yes")"
+    # Prompt if the user says 'yes' to changing name
+    if [[ "$computerName_prompt" =~ "Yes" ]]; then
+        $jamfBin policy -event "$rename_trigger"
+    fi
 fi
 
-# Prompt if the user says 'yes' to changing name
-if [[ "$computerName_prompt" == "1" ]]; then
-    $jamfBin policy -trigger "$rename_trigger"
-fi
-
-$jamfBin policy -trigger "$forceName_trigger"
+$jamfBin policy -event "$forceName_trigger"
 computerName="$(scutil --get ComputerName)"
 
 # change HostName and change LocalHostName
@@ -223,177 +266,195 @@ sudo scutil --set LocalHostName "$computerName"
 sudo scutil --set HostName "$computerName"
 echo "set LocalHostName and HostName"
 
-##
 ###### name check now done ######
-##
-function GetOUs() {
-        OU_SelectFrom="$(ldapsearch \
-        -H ldaps://$domainIP \
-        -D ${username}@$domainFull \
-        -w ${password} \
-        -b "$1" \
-        -s one o dn \
-        | grep 'dn: OU=' \
-        | awk -F= '{ split($2,arr,","); print arr[1] }' \
-        )"
-}
+
+# Which top level OU do you need to go to?
+# If we need to add more, add them here
+if [[ $rb -eq 0 ]]; then
+OUarray=()
+for item in $OU_choices
+do 
+    OUarray+=$"${item}\n"
+done
+OUarray=$(echo $OUarray |sed 's/..$//')
+
+OU_Choice="$(listChoice \
+    "Select a top OU to join" \
+    "Select top OU" \
+    "Cancel" \
+    "OK" \
+    $OUarray)"
+if [[ "$OU_Choice" =~ "false" ]]; then
+    exit 0
+fi
+DomainC="ou=$OU_Choice,$DomainCSuffix"
 
 n=1
+## repeat??
+
 while [[ $n -ne 3 ]]
 do
-#### Which OU to join to?
-# initial set
-OU_Search="$DomainC"
-while [[ -z $OU_SelectFrom ]]
+#### Dropdowns for which OU to join to
+## OU's under $OU_Choice
+while [[ -z $TOP_OUs ]]
 do
     IPGET
-    GetOUs $OU_Search
+    TOP_OUs="$(LDAPlookup "$DomainC")"
 done
 
 # Ask which main OU you want to join
-OU_OneFull="$($CocoaD \
-    standard-dropdown \
-    --title "Main OU" \
-    --text "Select a main OU to join" \
-    --items $OU_SelectFrom \
-    --float \
-    --no-cancel \
-    --string-output \
-)"
-OU_One=${OU_OneFull:3}
-OU_Search="ou=$OU_One,$OU_Search"
+TOP_OUarray=()
+for item in $TOP_OUs
+do 
+    TOP_OUarray+=$"${item}\n"
+done
+TOP_OUarray=$(echo $TOP_OUarray |sed 's/..$//')
+
+OU_One="$(listChoice \
+    "Select a main OU to join" \
+    "Main OU" \
+    "Cancel" \
+    "OK" \
+    $TOP_OUarray )"
+if [[ "$OU_One" =~ "false" ]]; then
+    exit 0
+fi
+OU_ONE_FULL="ou=$OU_One,$DomainC"
 
 ## OU's under $OU_One 
 # curently looks 4 deep. 
 # If more are needed, need another if statement
-GetOUs $OU_Search
-AD_Two_OUs=$OU_SelectFrom
+OU_TWO_ALL="$(LDAPlookup "$OU_ONE_FULL")"
+OU_TWOarray="$OU_One\n"
+
+for item in $OU_TWO_ALL
+    do 
+    OU_TWOarray+=$"${item}\n"
+done
+OU_TWOarray=$(echo $OU_TWOarray | sed 's/..$//')
 
 ## Begin mining the depths ############## if 1
-if [ -z "$AD_Two_OUs" ]; then
-    echo "OUs parsed"
-    OU_JoinFinal="ou=$OU_One,$DomainC"
+if [ -z "$OU_TWO_ALL" ]; then
+    OU_JoinFinal="$OU_ONE_FULL"
     echo "$OU_JoinFinal is selection"
     OU_UserGroup="$OU_One"
 else
     # Ask which OU (sub $OU_One) you want to join
-    # Add $OU_One to $AD_Two_OUs options
-    AD_Two_OUs="$OU_One $AD_Two_OUs"
-    
-    OU_TwoFull="$($CocoaD \
-        standard-dropdown \
-        --title "AnOUther OU" \
-        --text "Select a sub OU to join" \
-        --items $OU_SelectFrom \
-        --float \
-        --string-output \
-        --no-cancel \
-    )"
-    OU_Two=${OU_TwoFull:3}
-    OU_Search="ou=$OU_Two,$OU_Search"
+    OU_Two="$(listChoice \
+        "Select a sub OU to join" \
+        "AnOUther OU" \
+        "Cancel" \
+        "OK" \
+        $OU_TWOarray)"
+    if [[ "$OU_Two" =~ "false" ]]; then
+        exit 0
+    fi
+    OU_TWO_FULL="ou=$OU_Two,ou=$OU_One,$DomainC"
     
     # Check next level
-    GetOUs $OU_Search
-    AD_Three_OUs=$OU_SelectFrom
+    OU_THREE_ALL="$(LDAPlookup "$OU_TWO_FULL")"
+    OU_THREEarray="$OU_Two\n"
+    for item in $OU_THREE_ALL
+        do 
+        OU_THREEarray+=$"${item}\n"
+    done
+    OU_THREEarray=$(echo $OU_THREEarray | sed 's/..$//')
     # next ############## if 2
-    if [ -z "$AD_Three_OUs" ]; then
+    if [ -z "$OU_THREE_ALL" ]; then
         echo "OUs parsed"
         if [[ "$OU_One" == "$OU_Two" ]]; then
-            OU_JoinFinal="ou=$OU_One,$DomainC"
+            OU_JoinFinal="$OU_ONE_FULL"
             echo "$OU_JoinFinal is selection"
             OU_UserGroup="$OU_One"
         else
-            OU_JoinFinal="ou=$OU_Two,ou=$OU_One,$DomainC"
+            OU_JoinFinal="$OU_TWO_FULL"
             echo "$OU_JoinFinal is selection"
             OU_UserGroup="$OU_Two"
         fi
     else
-        # Ask which OU (sub $OU_Two) you want to join 
-        # Add $OU_Two to $AD_Three_OUs options
-        AD_Three_OUs="$OU_Two $AD_Three_OUs"
-        
-        OU_ThreeFull="$($CocoaD \
-            standard-dropdown \
-            --title "S[OU]b-day fun-day" \
-            --text "Don't go too deep, you'll awaken the Balrog" \
-            --items $OU_SelectFrom \
-            --float \
-            --string-output \
-            --no-cancel \
-        )"
-        OU_Three=${OU_ThreeFull:3}
-        OU_Search="ou=$OU_Three,$OU_Search"
-        
-        # We have to go deeper ##############
-        GetOUs $OU_Search
-        AD_Four_OUs=$OU_SelectFrom
+        # Ask which OU (sub $OU_Two) you want to join    
+        OU_Three="$(listChoice \
+            "Don't go too deep, you'll awaken the Balrog" \
+            "AnOUther OU" \
+            "Cancel" \
+            "OK" \
+            $OU_THREEarray)"
+        if [[ "$OU_Three" =~ "false" ]]; then
+            exit 0
+        fi
+        OU_THREE_FULL="ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+        # We have to go deeper ############## if 3
+        OU_FOUR_ALL="$(LDAPlookup "$OU_THREE_FULL")"
+        OU_FOURarray="$OU_Three\n"
+        for item in $OU_FOUR_ALL
+            do 
+            OU_FOURarray+=$"${item}\n"
+        done
+        OU_FOURarray=$(echo $OU_FOURarray | sed 's/..$//')
         # how far can we go?
-        if [ -z "$AD_Four_OUs" ]; then
+        if [ -z "$OU_FOUR_ALL" ]; then
             echo "OUs parsed"
             if [[ "$OU_Two" == "$OU_Three" ]]; then
-                OU_JoinFinal="ou=$OU_Two,ou=$OU_One,$DomainC"
+                OU_JoinFinal="$OU_TWO_FULL"
                 echo "$OU_JoinFinal is selection"
                 OU_UserGroup="$OU_Two"
             else
-                OU_JoinFinal="ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                OU_JoinFinal="$OU_THREE_FULL"
                 echo "$OU_JoinFinal is selection"
                 OU_UserGroup="$OU_Three"
             fi
         else
-            # Ask which OU (sub $OU_Two) you want to join 
-            # Add $OU_Three to $AD_Four_OUs options
-            AD_Four_OUs="$OU_Three $AD_Four_OUs"
-        
-            OU_FourFull="$($CocoaD \
-                standard-dropdown \
-                --title "Durin's Bane" \
-                --text "Drums in the Deep : Khazad Dum" \
-                --items $OU_SelectFrom \
-                --float \
-                --string-output \
-                --no-cancel \
-            )"
-            OU_Four=${OU_FourFull:3}
-            OU_Search="ou=$OU_Four,$OU_Search"
+            # Ask which OU (sub $OU_Two) you want to join         
+            OU_Four="$(listChoice \
+                "Drums in the Deep: Khazad Dum" \
+                "Durin's Bane" \
+                "Cancel" \
+                "OK" \
+                $OU_FOURarray)"
+            if [[ "$OU_Four" =~ "false" ]]; then
+                exit 0
+            fi
+            OU_FOUR_FULL="ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
         # we're done?
         
         # idk just another check ############## if 4
-        GetOUs $OU_Search
-        AD_Five_OUs=$OU_SelectFrom
+        OU_FIVE_ALL="$(LDAPlookup "$OU_FOUR_FULL")"
+        OU_FIVEarray="$OU_Four\n"
+        for item in $OU_FIVE_ALL
+            do 
+            OU_FIVEarray+=$"${item}\n"
+        done
+        OU_FIVEarray=$(echo $OU_FIVEarray | sed 's/..$//')
             # how far can we go?
-            if [ -z "$AD_Five_OUs" ]; then
+            if [ -z "$OU_FIVE_ALL" ]; then
                 echo "OUs parsed"
                 if [[ "$OU_Three" == "$OU_Four" ]]; then
-                    OU_JoinFinal="ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    OU_JoinFinal="$OU_THREE_FULL"
                     echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Three"
                 else
-                    OU_JoinFinal="ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    OU_JoinFinal="$OU_FOUR_FULL"
                     echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Four"
                 fi
             else
-            # Ask which OU (sub $OU_Two) you want to join 
-            # Add $OU_Four to $AD_Five_OUs options
-            AD_Four_OUs="$OU_Two $AD_Five_OUs"
-        
-            OU_FiveFull="$($CocoaD \
-                standard-dropdown \
-                --title "Final stand" \
-                --text "I am a servant of the secret fire, wielder of the flame of Anor. You cannot pass. The dark fire will not avail you, flame of Udûn. Go back to the Shadow! You cannot pass." \
-                --items $OU_SelectFrom \
-                --float \
-                --string-output \
-                --no-cancel \
-            )"
-            OU_Five=${OU_FiveFull:3}
+            # Ask which OU (sub $OU_Two) you want to join         
+            OU_Five="$(listChoice \
+                "I am a servant of the secret fire, wielder of the flame of Anor. You cannot pass. The dark fire will not avail you, flame of Udûn. Go back to the Shadow! You cannot pass." \
+                "Final Stand" \
+                "Cancel" \
+                "OK" \
+                "$OU_FIVEarray")"
+            if [[ "$OU_Five" =~ "false" ]]; then
+                exit 0
+            fi
             # MAKE IT STOP ############## if done
                 if [[ "$OU_Four" == "$OU_Five" ]]; then
-                    OU_JoinFinal="ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    OU_JoinFinal="$OU_FOUR_FULL"
                     echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Four"
                 else
-                    OU_JoinFinal="ou=$OU_Five,ou=$OU_Four,ou=$OU_Three,ou=$OU_Two,ou=$OU_One,$DomainC"
+                    OU_JoinFinal="$OU_FIVE_FULL"
                     echo "$OU_JoinFinal is selection"
                     OU_UserGroup="$OU_Five"
                 fi
@@ -406,34 +467,66 @@ fi
 niceOU_Join="$(echo $OU_JoinFinal | sed -e 's/ou=//g;s/,dc=/./g')"
 
 ## Make sure this choice is correct
-OU_Check="$($CocoaD \
-    yesno-msgbox \
-    --text "Confirm Selection" \
-    --informative-text "You are attempting to join $computerName to the following location: $niceOU_Join is this correct?" \
-    --float \
-    )"
+OU_Check="$(2ButtonInfoBox \
+    "You are attempting to join $computerName to the following location: $niceOU_Join - is this correct?" \
+    "Confirm Selection" \
+    "No" \
+    "Yes")"
     
-if [[ $OU_Check -eq 1 ]]; then
+if [[ $OU_Check =~ "Yes" ]]; then
     n=3
-elif [[ $OU_Check -eq 2 ]]; then
+elif [[ $OU_Check =~ "No" ]]; then
     n=2
-    echo "play that song one more time!"
-elif [[ $OU_Check -eq 3 ]]; then
-    exit 0
-    echo "cancelling script"
+    echo "Wrong choice, starting over"
 fi
 done 
 
-##
+# everything skips if user leaves
+elif [[ $rb -eq 1 ]]; then
+    OU_JoinFinal=$AD_PreviousOU
+    niceOU_Join="$(echo $OU_JoinFinal | sed -e 's/ou=//g;s/,dc=/./g')"
+    echo "rebind of machine to $OU_JoinFinal"
+    ## Next lines are used for display name and for giving admin rights
+    ## adjust as necessary
+    ## can ignore if statement if no user groups get admin
+    if [[ "$AD_PreviousOU" =~ "$name1" ]]; then
+        OU_One=""
+        OU_UserGroup=$(echo $AD_PreviousOU \
+            | cut -d, -f2- \
+            | awk -F, '{print $1}' \
+            | awk -F= '{print $2}' )
+    elif [[ "$AD_PreviousOU" =~ "$name2" ]]; then
+        OU_One=""
+    elif [[ "$AD_PreviousOU" =~ "$name3" ]]; then
+        OU_One=""
+    fi
+else 
+    echo "something odd"
+fi # closes remove/leave option
+
 ####### Bind to AD #######
 ##
+## These are also specific to admin groups, adjust as necessary
+## Can ignore if no user groups get admin
+if [[ "$OU_One" =~ "$name2" ]] || [[ "$OU_One" =~ "$name3" ]]; then
+    echo "user group will be $domain\\$admin_here"
+    Ask_User="$OU_One"
+else
+    echo "user group will be $domain\\$admin_here"
+    Ask_User="$OU_UserGroup"
+fi
+
+userAdmin="$domain\\$admin_here"
+
+# set admin groups
+groupAdmin="$domain\\$admin2_here"
 
 # bind to AD
 dsconfigad \
     -add "$domainFull" \
     -alldomains disable \
     -computer $computerName \
-    -username "${username}" \
+    -username "${domainID}" \
     -password "${password}" \
     -mobile enable \
     -mobileconfirm disable \
@@ -458,25 +551,24 @@ adminCheck="$(dsconfigad -show | awk '/admin groups/ {print $NF}')"
 domainCheck="$(dsconfigad -show | awk '/Directory Domain/ {print $NF}')"
 
 if [[ -z $nameCheck ]]; then
-    $CocoaD \
-        msgbox \
-        --text "Error" \
-        --informative-text "Something went wrong. Please run the policy Bind to AD again. If you continue to have issues, please contact an admin." \
-        --button1 "OK" \
-        --float
+    1ButtonInfoBox \
+        "Something went wrong. Please run the policy again." \
+        "Error" \
+        "OK"
     # echo output
     echo "Failure to bind. Try again."
 else
-    $CocoaD \
-        msgbox \
-        --text "Success!" \
-        --informative-text "This computer, $nameCheck, has been bound to $domainCheck.  Groups able to administer are $adminCheck" \
-        --button1 "That was easy" \
-        --float
+    1ButtonInfoBox \
+        "This computer, ${nameCheck}, has been bound to ${domainCheck}. Groups able to administer are $adminCheck" \
+        "Success" \
+        "That was easy"
     # echo output
     echo "$nameCheck has been bound to $domainCheck in $niceOU_Join"
 fi
 
+# these 2 automatically give 802.1x profile
+touch "$wifiJAMFreceipt"
+touch "$PEAPProfileReceipt"
 $jamfBin recon &
     
 exit 0
