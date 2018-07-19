@@ -1,154 +1,143 @@
 #!/bin/bash
 
 # Rename Mac through Self Service Policy
-# jjourney 07/2016
 
 ###### Variables ######
 # System
-CocoaD="/Library/$company/CD/CocoaDialog.app/Contents/MacOS/CocoaDialog"
 computerName="$(scutil --get ComputerName)"
 serialNumber="$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')"
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 
-# JSS
-jss="https://your.jss.here:8443"
-AD="your.domain.here"
+# jamf
+jamf="" # yours goes here
+triggername="" # this is for a policy to force jamf name
 
-###### Exit if CD not found ######
-# Will try and download policy with trigger listed
-trigger="polCocoaDialog"
-i=1
-while [[ ! -f "$CocoaD" ]] && [[ $i -ne 4 ]]
-do
-    "$jamfHelper" \
-        -windowType hud \
-        -alignDescription center \
-        -title "Error" \
-        -description "Dependencies not found with install. Try number $i to download dependencies..." \
-        -lockHUD \
-        -timeout 10 \
-        -countdown
-    sudo jamf policy -trigger "$trigger"
-    i=$(( $i + 1 ))
-done
+# Function to decrypt the string
+function DecryptString() {
+    # Usage: ~$ DecryptString "Encrypted String" "Salt" "Passphrase"
+    echo "${1}" | /usr/bin/openssl enc -aes256 -d -a -A -S "${2}" -k "${3}"
+}
 
-if [[ $i -eq 4 ]]; then
-    "$jamfHelper" \
-        -windowType hud \
-        -alignDescription center \
-        -title "Error" \
-        -description "Dependencies not able to be downloaded. Please contact your administrator" \
-        -button1 "OK" \
-        -lockHUD
-    exit 1
-fi
+# Decrypt password
+apiUser=$(DecryptString $4 '' '') # input values here - https://github.com/jamfit/Encrypted-Script-Parameters
+apiPass=$(DecryptString $5 '' '') # input values here - https://github.com/jamfit/Encrypted-Script-Parameters
 
+# applescript
+#
+# template:
+########### Title - "$2" ############
+#                                   #
+#     Text to display - "$1"        #
+#                                   #
+#      [Default response - "$5"]    #
+#                                   #
+#               (B1 "$3") (B2 "$4") # <- Button 2 default
+#####################################
 
-###### User info ######
-# Get Username
-username_Full="$($CocoaD \
-    standard-inputbox \
-    --title "$AD ID" \
-    --informative-text "Please enter your $AD ID." \
-    --empty-text "Please type in your $AD before clicking OK." \
-    --button1 "OK" \
-    --button2 "Cancel" \
-    --float \
-    --string-output \
-    )"
-if [[ "$username_Full" =~ "Cancel" ]]; then
-    exit 0
-    echo "user cancelled"
-fi
-username=${username_Full:3}
+function simpleInput() {
+osascript <<EOT
+tell app "System Events" 
+with timeout of 86400 seconds
+text returned of (display dialog "$1" default answer "$5" buttons {"$3", "$4"} default button 2 with title "$2")
+end timeout
+end tell
+EOT
+}
 
-# Get Password
-password_Full="$($CocoaD \
-    secure-inputbox \
-    --title "$AD Password" \
-    --informative-text "Please enter your $AD Password" \
-    --empty-text "Please type in your $AD Password before clicking OK." \
-    --button1 "OK" \
-    --button2 "Cancel" \
-    --float \
-    --string-output \
-    )"
-if [[ "$password_Full" =~ "Cancel" ]]; then
-    exit 0
-    echo "user cancelled"
-fi
-password="${password_Full:3}"
+function hiddenInput() {
+osascript <<EOT
+tell app "System Events" 
+with timeout of 86400 seconds
+text returned of (display dialog "$1" with hidden answer default answer "" buttons {"$3", "$4"} default button 2 with title "$2")
+end timeout
+end tell
+EOT
+}
 
+function 1ButtonInfoBox() {
+osascript <<EOT
+tell app "System Events"
+with timeout of 86400 seconds
+button returned of (display dialog "$1" buttons {"$3"} default button 1 with title "$2")
+end timeout
+end tell
+EOT
+}
+
+function 2ButtonInfoBox() {
+osascript <<EOT
+tell app "System Events"
+with timeout of 86400 seconds
+button returned of (display dialog "$1" buttons {"$3", "$4"} default button 2 with title "$2")
+end timeout
+end tell
+EOT
+}
+
+function listChoice() {
+osascript <<EOT
+tell app "System Events"
+with timeout of 86400 seconds
+choose from list every paragraph of "$5" with title "$2" with prompt "$1" OK button name "$4" cancel button name "$3"
+end timeout
+end tell
+EOT
+}
 
 #### changing computer name ######
 # ask if user wants to change it
-computerName_prompt="$($CocoaD \
-    yesno-msgbox \
-    --title "Computer Name" \
-    --text "$computerName" \
-    --informative-text "The current name is $computerName. Would you like to change it?" \
-    --float \
-    --no-cancel \
-    )"  
+computerName_prompt="$(2ButtonInfoBox \
+    "The current name is $computerName. Would you like to change it?" \
+    "Computer Name" \
+    "Cancel" \
+    "OK")"
+if [[ "$computerName_prompt" != "OK" ]]; then
+    exit 0
+fi
 
 # Prompts if the user says yes
-if [ "$computerName_prompt" -eq 1 ]; then
+if [[ "$computerName_prompt" =~ "OK" ]]; then
     oldName="$(curl \
         -s \
-        -u $username:"$password" \
-        -X GET $jss/JSSResource/computers/serialnumber/$serialNumber \
+        -f \
+        -u "$apiUser:$apiPass" \
+        -X GET $jamf/JSSResource/computers/serialnumber/$serialNumber \
         -H "Accept: application/xml" \
         | xpath //computer/general/name[1] \
         | sed -e 's/<name>//;s/<\/name>//' \
         )"
     # if yes, continue
     if [ -z "$oldName" ]; then
-        $CocoaD \
-            ok-msgbox \
-            --title "Error Connecting to JSS" \
-            --text "Error" \
-            --informative-text "There seems to be an issue connecting to JSS. Please try again." \
-            --float 
+        error_full="$(2ButtonInfoBox \
+            "There seems to be an issue connecting to jamf. Please try again" \
+            "Error" \
+            "Cancel" \
+            "OK")"
         exit 1
     else
         # Enter new computer name
-        newComputerName="$($CocoaD \
-        standard-inputbox \
-        --title "New Name" \
-        --informative-text "Please enter the new Name:" \
-        --text "$oldName" \
-        --button1 "OK" \
-        --button2 "Cancel" \
-        --float \
-        --value-required \
-        --string-output \
-        )"
-        if [[ "$newComputerName" =~ "Cancel" ]]; then
+        newComputerName="$(simpleInput \
+            "Please enter the new name:" \
+            "New Name" \
+            "Cancel" \
+            "OK" \
+            "$oldName")"
+        if [[ "$?" != 0 ]]; then
             exit 0
-            echo "user cancelled"
         fi
-        newComputerName=${newComputerName:3}
         # Make sure there is no space (" ") 
         pattern=" |'"
         while [[ -z "$newComputerName" || "$newComputerName" =~ $pattern ]]
             do
-            newComputerName="$($CocoaD \
-            standard-inputbox \
-            --title "New Name" \
-            --informative-text "Cannot contain a space or be blank, please enter the new name:" \
-            --text "$oldName" \
-            --empty-text "$oldName" \
-            --button1 "OK" \
-            --button2 "Cancel" \
-            --float \
-            --value-required \
-            --string-output \
-            )"
-            if [[ "$newComputerName" =~ "Cancel" ]]; then
+            newComputerName="$(simpleInput \
+                "Please enter the new name:" \
+                "New Name" \
+                "Cancel" \
+                "OK" \
+                "$oldName")"
+            if [[ "$?" != 0 ]]; then
                 exit 0
-                echo "user cancelled"
-            fi  
-            newComputerName=${newComputerName:3}
+            fi
         done
 
         # set apiData
@@ -157,36 +146,34 @@ if [ "$computerName_prompt" -eq 1 ]; then
         # Final PUT command, updating new Name
         curl \
             -s \
-            -u \
-            $username:"$password" \
+            -f \
+            -u "$apiUser:$apiPass" \
             -X PUT \
             -H "Content-Type: text/xml" \
-            -d "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>$apiData" $jss/JSSResource/computers/serialnumber/$serialNumber
+            -d "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>$apiData" $jamf/JSSResource/computers/serialnumber/$serialNumber
     
         # Change variable
         computerName="$newComputerName"
     
         # Run policy to have it update
-        sudo jamf policy -trigger polForceName
+        sudo jamf policy -trigger $triggername
 
         # New Check
         checkName="$(curl \
             -s \
-            -u $username:"$password" \
-            -X GET $jss/JSSResource/computers/serialnumber/$serialNumber \
+            -f \
+            -u "$apiUser:$apiPass" \
+            -X GET $jamf/JSSResource/computers/serialnumber/$serialNumber \
             -H "Accept: application/xml" \
             | xpath //computer/general/name[1] \
             | sed -e 's/<name>//;s/<\/name>//' \
             )"
 
         # Display newest Name
-        $CocoaD \
-            ok-msgbox \
-            --title "Computer Name" \
-            --text "$checkName" \
-            --informative-text "The new name is $checkName." \
-            --float \
-            --no-cancel
+        1ButtonInfoBox \
+            "The new name is $checkName" \
+            "Computer Name" \
+            "OK"
     fi
 fi
 
