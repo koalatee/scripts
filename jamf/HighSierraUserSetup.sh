@@ -38,55 +38,161 @@
 
 ###
 #
-#            Setup: Fill in relevant IT + FORGOT_PW_MESSAGE
-#                   Default is to prompt for the guiAdmin (that has SecureToken), can input the guiAdmin user if you want
+#       Changed by: jjourney 08/2018
+#          changes: guiAdmin now gives you the current users that already have secureToken
+#                   via diskutil apfs listUsers /
+#                   Removed jamfhelper and applescript confusion
+#                   Added all osascript functions, should be easier to read
 #
 ###
+
+###
+#
+#            Setup: Fill in relevant IT + FORGOT_PW_MESSAGE
+#
+###
+
+# applescript
+#
+# template:
+########### Title - "$2" ############
+#                                   #
+#     Text to display - "$1"        #
+#                                   #
+#      [Default response - "$5"]    #
+#                                   #
+#               (B1 "$3") (B2 "$4") # <- Button 2 default
+#####################################
+
+function simpleInput() {
+osascript <<EOT
+tell app "System Events" 
+with timeout of 86400 seconds
+text returned of (display dialog "$1" default answer "$5" buttons {"$3", "$4"} default button 2 with title "$2")
+end timeout
+end tell
+EOT
+}
+
+function hiddenInput() {
+osascript <<EOT
+tell app "System Events" 
+with timeout of 86400 seconds
+text returned of (display dialog "$1" with hidden answer default answer "" buttons {"$3", "$4"} default button 2 with title "$2")
+end timeout
+end tell
+EOT
+}
+
+function hiddenInputNoCancel() {
+osascript <<EOT
+tell app "System Events" 
+with timeout of 86400 seconds
+text returned of (display dialog "$1" with hidden answer default answer "" buttons {"$3"} default button 1 with title "$2")
+end timeout
+end tell
+EOT
+}
+
+function OneButtonInfoBox() {
+osascript <<EOT
+tell app "System Events"
+with timeout of 86400 seconds
+button returned of (display dialog "$1" buttons {"$3"} default button 1 with title "$2")
+end timeout
+end tell
+EOT
+}
+
+function TwoButtonInfoBox() {
+osascript <<EOT
+tell app "System Events"
+with timeout of 86400 seconds
+button returned of (display dialog "$1" buttons {"$3", "$4"} default button 2 with title "$2")
+end timeout
+end tell
+EOT
+}
+
+function listChoice() {
+osascript <<EOT
+tell app "System Events"
+with timeout of 86400 seconds
+choose from list every paragraph of "$5" with title "$2" with prompt "$1" OK button name "$4" cancel button name "$3"
+end timeout
+end tell
+EOT
+}
 
 ########## variable-ing ##########
 
 # replace with username of a GUI-created admin account
 # (or any admin user with SecureToken access)
-guiAdmin=""
-jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 PROMPT_TITLE="Password Needed For FileVault"
+FORGOT_PW_MESSAGE=""
 IT=""
-FORGOT_PW_MESSAGE="You made five incorrect password attempts.
-Please contact $IT for assistance."
 
 # leave these values as-is
 loggedInUser=$(/usr/bin/python -c 'from SystemConfiguration import SCDynamicStoreCopyConsoleUser; import sys; username = (SCDynamicStoreCopyConsoleUser(None, None, None) or [None])[0]; username = [username,""][username in [u"loginwindow", None, u""]]; sys.stdout.write(username + "\n");')
 loggedInUserFull=$(id -F $loggedInUser)
-# Get information necessary to display messages in the current user's context.
-USER_ID=$(/usr/bin/id -u "$loggedInUser")
-L_ID=$USER_ID
-L_METHOD="asuser"
 
 ########## function-ing ##########
+cryptousers=$(diskutil apfs listusers / |awk -F+ '{print $2}' |cut -c 4-)
+allusers=()
+for GUID in $cryptousers
+do
+    usercheck=$(sudo dscl . -search /Users GeneratedUID $GUID \
+    | awk 'NR == 1' \
+    | cut -c -9)
+    if [[ ! -z $usercheck ]]; then
+        allusers+=$usercheck
+    fi
+done
 
-if [[ -z $guiAdmin ]]; then
-    # Get the $guiAdmin via a prompt
-    guiAdmin="$(/bin/launchctl "$L_METHOD" "$L_ID" /usr/bin/osascript -e 'display dialog "Please enter the username of the user with Secure Token:" default answer "" with title "'"${PROMPT_TITLE//\"/\\\"}"'" giving up after 86400 with text buttons {"OK"} default button 1' -e 'return text returned of result')"
+for item in $allusers
+do
+    arrayChoice+=$"${item}\n"
+done
+arrayChoice=$(echo $arrayChoice |sed 's/..$//')
+
+# Let's-a go!
+guiAdmin="$(listChoice \
+    "Please select a user with secure token that you know the password to:" \
+    "Select SecureToken User" \
+    "Cancel" \
+    "OK" \
+    $arrayChoice)"
+if [[ "$guiAdmin" =~ "false" ]]; then
+    echo "Cancelled by user"
+    exit 0
 fi
 # Get the $guiAdmin password via a prompt.
 echo "Prompting $guiAdminPass for their Mac password..."
-guiAdminPass="$(/bin/launchctl "$L_METHOD" "$L_ID" /usr/bin/osascript -e 'display dialog "Please enter the password for '"$guiAdmin"':" default answer "" with title "'"${PROMPT_TITLE//\"/\\\"}"'" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer' -e 'return text returned of result')"
-
+guiAdminPass="$(hiddenInputNoCancel \
+    "Please enter the password for $guiAdmin:" \
+    "$PROMPT_TITLE" \
+    "OK")"
+    
 # Thanks to James Barclay (@futureimperfect) for this password validation loop.
 TRY=1
 until /usr/bin/dscl /Search -authonly "$guiAdmin" "$guiAdminPass" &>/dev/null; do
     (( TRY++ ))
     echo "Prompting $guiAdmin for their Mac password (attempt $TRY)..."
-    guiAdminPass="$(/bin/launchctl "$L_METHOD" "$L_ID" /usr/bin/osascript -e 'display dialog "Sorry, that password was incorrect. Please try again:" default answer "" with title "'"${PROMPT_TITLE//\"/\\\"}"'" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer' -e 'return text returned of result')"
+    guiAdminPass="$(hiddenInput \
+        "Sorry, that password was incorrect. Please try again:" \
+        "$PROMPT_TITLE" \
+        "Cancel" \
+        "OK" )"
+        echo "This is the password: $guiAdminPass"
+        if [[ "$guiAdminPass" =~ "false" ]] || [[ -z "$guiAdminPass" ]]; then
+            exit 0
+        fi
     if (( TRY >= 5 )); then
         echo "[ERROR] Password prompt unsuccessful after 5 attempts. Displaying \"forgot password\" message..."
-        /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-            -windowType "utility" \
-            -title "$PROMPT_TITLE" \
-            -description "$FORGOT_PW_MESSAGE" \
-            -button1 'OK' \
-            -defaultButton 1 \
-            -startlaunchd &>/dev/null &
+        OneButtonInfoBox \
+            "$FORGOT_PW_MESSAGE" \
+            "$PROMPT_TITLE" \
+            "OK" &
         exit 1
     fi
 done
@@ -103,23 +209,29 @@ securetoken_add () {
 
 # Get the logged in user's password via a prompt.
 echo "Prompting $loggedInUser for their Mac password..."
-loggedInUserPass="$(/bin/launchctl "$L_METHOD" "$L_ID" /usr/bin/osascript -e 'display dialog "Please enter the password for '"$loggedInUserFull"', the one used to log in to this Mac:" default answer "" with title "'"${PROMPT_TITLE//\"/\\\"}"'" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer' -e 'return text returned of result')"
-
+loggedInUserPass="$(hiddenInputNoCancel \
+    "Please enter the password for $loggedInUserFull, the one used to log in to this Mac:" \
+    "Password needed for Filevault" \
+    "OK")"
 # Thanks to James Barclay (@futureimperfect) for this password validation loop.
 TRY=1
 until /usr/bin/dscl /Search -authonly "$loggedInUser" "$loggedInUserPass" &>/dev/null; do
     (( TRY++ ))
     echo "Prompting $loggedInUser for their Mac password (attempt $TRY)..."
-    $loggedInUserPass="$(/bin/launchctl "$L_METHOD" "$L_ID" /usr/bin/osascript -e 'display dialog "Sorry, that password was incorrect. Please try again:" default answer "" with title "'"${PROMPT_TITLE//\"/\\\"}"'" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer' -e 'return text returned of result')"
+    loggedInUserPass="$(hiddenInput \
+        "Sorry, that password was incorrect. Please try again:" \
+        "$PROMPT_TITLE" \
+        "Cancel" \
+        "OK")"
+        if [[ "$loggedInUserPass" =~ "false" ]] || [[ -z "$loggedInUserPass" ]]; then
+            exit 0
+        fi
     if (( TRY >= 5 )); then
         echo "[ERROR] Password prompt unsuccessful after 5 attempts. Displaying \"forgot password\" message..."
-        /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-            -windowType "utility" \
-            -title "$PROMPT_TITLE" \
-            -description "$FORGOT_PW_MESSAGE" \
-            -button1 'OK' \
-            -defaultButton 1 \
-            -startlaunchd &>/dev/null &
+        OneButtonInfoBox \
+            "$FORGOT_PW_MESSAGE" \
+            "$PROMPT_TITLE" \
+            "OK" &
         exit 1
     fi
 done
@@ -138,13 +250,10 @@ securetoken_double_check () {
     if [[ "$secureTokenCheck" =~ "DISABLED" ]]; then
         echo "❌ ERROR: Failed to add SecureToken to $loggedInUser for FileVault access."
         echo "Displaying \"failure\" message..."
-        /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-            -windowType "utility" \
-            -title "Failure" \
-            -description "Failed to set SecureToken for $loggedInUser. Status is $secureTokenCheck. Please contact $IT." \
-            -button1 'OK' \
-            -defaultButton 1 \
-            -startlaunchd &>/dev/null &
+        OneButtonInfoBox \
+            "Failed to set SecureToken for $loggedInUser. Status is $secureTokenCheck. Please contact $IT." \
+            "Failure" \
+            "OK" &
         exit 1
     elif [[ "$secureTokenCheck" =~ "ENABLED" ]]; then
         securetoken_success
@@ -157,13 +266,10 @@ securetoken_double_check () {
 securetoken_success () {
     echo "✅ Verified SecureToken is enabled for $loggedInUser."
     echo "Displaying \"success\" message..."
-    /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-        -windowType "utility" \
-        -title "Success!" \
-        -description "SecureToken is now set to \"Enabled\" for $loggedInUser." \
-        -button1 'OK' \
-        -defaultButton 1 \
-        -startlaunchd &>/dev/null
+    OneButtonInfoBox \
+        "SecureToken is now set to 'Enabled' for $loggedInUser." \
+        "Success!" \
+        "OK"
 }
 
 adduser_filevault () {
@@ -199,32 +305,23 @@ adduser_filevault () {
         filevault_list=$(sudo fdesetup list 2>&1)
         if [[ ! "$filevault_list" =~ "$loggedInUser" ]]; then
             echo "Error adding user!"
-            /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-                -windowType "utility" \
-                -title "Failed to add" \
-                -description "Failed to add $loggedInUserFull to Filevault. Please try to add manually." \
-                -button1 'OK' \
-                -defaultButton 1 \
-                -startlaunchd &>/dev/null &
+            OneButtonInfoBox \
+                "Failed to add $loggedInUserFull to filevault. Please try to add manually." \
+                "Failed to add" \
+                "OK" &
         elif [[ "$filevault_list" =~ "$loggedInUser" ]]; then
             echo "Success adding user!"
-            /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-                -windowType "utility" \
-                -title "Success!" \
-                -description "Succeeded in adding $loggedInUserFull to Filevault." \
-                -button1 'OK' \
-                -defaultButton 1 \
-                -startlaunchd &>/dev/null &
+            OneButtonInfoBox \
+                "Succeeded in adding $loggedInUserFull to filevault." \
+                "Success!" \
+                "OK" &
         fi
     elif [[ "$filevault_list" =~ "$loggedInUser" ]]; then
         echo "Success adding user!"
-        /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-            -windowType "utility" \
-            -title "Success!" \
-            -description "$loggedInUserFull is a Filevault enabled user." \
-            -button1 'OK' \
-            -defaultButton 1 \
-            -startlaunchd &>/dev/null &
+        OneButtonInfoBox \
+            "$loggedInUserFull is a filevault enabled user." \
+            "Success!" \
+            "OK" &
     fi
 
     # run updatePreboot to show user
@@ -246,13 +343,10 @@ elif [[ "$secureTokenCheck" =~ "ENABLED" ]]; then
     adduser_filevault
 else
     echo "Error with sysadminctl"
-    /bin/launchctl "$L_METHOD" "$L_ID" "$jamfHelper" \
-        -windowType "utility" \
-        -title "Failure" \
-        -description "Failure to run. Please contact $IT" \
-        -button1 'OK' \
-        -defaultButton 1 \
-        -startlaunchd &>/dev/null &
+    OneButtonInfoBox \
+        "Failure to run. Please contact $IT" \
+        "Failure" \
+        "OK" &
 fi
 
 # Clear password variable.
