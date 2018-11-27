@@ -49,6 +49,14 @@
 
 ###
 #
+#       Changed by: jjourney 11/2018
+#          changes: changed how to get cryptousers and processing the GUIDs
+#                   accounts for users over 8 char and some 10.14(?) issues
+#
+###
+
+###
+#
 #            Setup: Fill in relevant IT + FORGOT_PW_MESSAGE
 #
 ###
@@ -147,9 +155,10 @@ getPassword_guiAdminAPFS () {
     do
         usercheck=$(sudo dscl . -search /Users GeneratedUID $GUID \
         | awk 'NR == 1' \
-        | cut -c -9)
+        | awk '{print $1}')
         if [[ ! -z $usercheck ]]; then
-            allusers+=$usercheck
+            echo $usercheck
+            allusers+=($usercheck)
         fi
     done
     # make it nice for applescript
@@ -438,7 +447,7 @@ adduser_filevaultHFS () {
 $jamfBin policy -event $adminfix
 
 ########## main process ##########
-cryptousers=$(diskutil apfs listusers / |awk -F+ '{print $2}' |cut -c 4-)
+cryptousers=$(diskutil apfs listusers / |awk '/\+--/ {print $NF}')
 
 # check if actually apfs disk or not
 if [[ -z "$cryptousers" ]]; then
