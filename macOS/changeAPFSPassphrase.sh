@@ -188,6 +188,8 @@ OneButtonInfoBox \
     "Success!" \
     "OK" &
     
+sudo diskutil apfs updatePreboot /
+
 # clear variables
 unset oldPassword
 unset newPassword
