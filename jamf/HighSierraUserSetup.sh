@@ -196,7 +196,6 @@ getPassword_guiAdminAPFS () {
             "$PROMPT_TITLE" \
             "Cancel" \
             "OK" )"
-            echo "This is the password: $guiAdminPass"
             if [[ "$guiAdminPass" =~ "false" ]] || [[ -z "$guiAdminPass" ]]; then
                 exit 0
             fi
@@ -250,7 +249,6 @@ getPassword_guiAdminHFS () {
             "$PROMPT_TITLE" \
             "Cancel" \
             "OK" )"
-            echo "This is the password: $guiAdminPass"
             if [[ "$guiAdminPass" =~ "false" ]] || [[ -z "$guiAdminPass" ]]; then
                 exit 0
             fi
