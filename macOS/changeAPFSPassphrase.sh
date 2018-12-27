@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # jjourney 12-2018
 # try and help with updating fv password
@@ -122,7 +122,7 @@ changeUser="$(listChoice \
     "Click To Select User" \
     "Cancel" \
     "OK" \
-    $arrayChoice)"
+    "$arrayChoice")"
 if [[ "$changeUser" =~ "false" ]]; then
     echo "Cancelled by user"
     exit 0
