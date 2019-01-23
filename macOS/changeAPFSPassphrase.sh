@@ -101,7 +101,7 @@ arrayChoice=()
 # already got the $cryptousers
 for GUID in $cryptousers
 do
-    usercheck=$(sudo dscl . -search /Users GeneratedUID $GUID \
+    usercheck=$(dscl . -search /Users GeneratedUID $GUID \
     | awk 'NR == 1' \
     | awk '{print $1}')
     if [[ ! -z $usercheck ]]; then
@@ -188,7 +188,7 @@ OneButtonInfoBox \
     "Success!" \
     "OK" &
     
-sudo diskutil apfs updatePreboot /
+diskutil apfs updatePreboot /
 
 # clear variables
 unset oldPassword
