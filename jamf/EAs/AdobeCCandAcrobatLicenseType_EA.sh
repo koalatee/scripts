@@ -1,22 +1,29 @@
 #!/bin/sh
 
 ###### jjourney 01/2017 ######
-# Checks Adobe license type
-
+# Checks Adobe CC license type
 # Update 3/2019 
 # Checks Acrobat as well
 
-# Setup:
-# Enter appropriate variable changes
+# This should check your CC install (via swidtag) and Acrobat install to see what license is installed (if any)
+# Writes to extension attributes (because do you need this to run every recon? probably not)
+# See setup for what parameters to pass and what policies to setup
+
+### Script Setup:
+# Enter appropriate parameter changes
 # - 4 is encrypted user string
 # - 5 is encrypted pass string
 # - 6 is CC swidtag location (shouldn't change?)
-# - 7 is where the AdobeExpiryTool is located (see note below)
+# - 7 is where the AdobeExpiryTool is located locally on the machine (see note below)
 # - 8 is trigger to download if not found (or you can include it with this policy)
 # - 9 is Creative Cloud License EA ID
 # - 10 is Acrobat Pro License EA ID
+### Policy Setup:
 # Setup a jamf policy with this script and the correct parameters
 # Setup another jamf policy with the trigger to install the AcrobatExpiryTool
+### jamf setup:
+# Setup 2 computer extension attributes with string data type and text field entry
+# ID goes in $9 and $10
 
 # API URL
 apiURL="https://your.jamf.here:8443"
