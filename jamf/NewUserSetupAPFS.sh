@@ -58,6 +58,7 @@
 ###
 #
 #            Setup: Fill in relevant IT + FORGOT_PW_MESSAGE
+#                   Only jamf relevant piece is line 446, calls a policy to make current user admin, jamf not necessary
 #
 ###
 
