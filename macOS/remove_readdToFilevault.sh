@@ -305,13 +305,13 @@ securetoken_success () {
 getPassword_guiAdminAPFS
 getPassword_loggedInUser
 # Remove the user from filevault:
-# - fdesetup remove -user {userASURITE}
+# - fdesetup remove -user {USERNAME}
 filevault_remove
 # Now remove the token: 
-# - Sysadminctl interactive -secureTokenOff {userASURITE} -password 
+# - Sysadminctl interactive -secureTokenOff {USERNAME} -password 
 securetoken_removal
 # Now turn it back on:
-# - Sysadminctl interactive -secureTokenOn {userASURITE} -password 
+# - Sysadminctl interactive -secureTokenOn {USERNAME} -password 
 securetoken_add
 # Should automatically be added to filevault, check with:
 # Run this command to make sure the user shows up in the filevault list 
