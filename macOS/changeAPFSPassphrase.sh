@@ -117,6 +117,12 @@ done
 arrayChoice=$(echo $arrayChoice |sed 's/..$//')
 
 # Let's-a go!
+# apparently doing list osascript first doesn't work in 10.15 catalina
+OneButtonInfoBox \
+	"$CONTACT_IT" \
+    "Warning" \
+    "OK"
+    
 changeUser="$(listChoice \
     "Please select the user you want to update the Filevault password for:" \
     "Click To Select User" \
