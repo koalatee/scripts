@@ -301,6 +301,16 @@ securetoken_success () {
         "OK"
 }
 
+confirmation=$(TwoButtonInfoBox \
+    "Make sure you are not trying to modify the only SecureToken User, or it may break." \
+    "WARNING" \
+    "Cancel" \
+    "OK")
+if [[ -z "$confirmation" ]]; then
+    echo "exiting"
+    exit 0
+fi
+
 # with our powers combined....
 getPassword_guiAdminAPFS
 getPassword_loggedInUser
