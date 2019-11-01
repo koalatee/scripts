@@ -448,6 +448,11 @@ $jamfBin policy -event $adminfix
 ########## main process ##########
 cryptousers=$(diskutil apfs listusers / |awk '/\+--/ {print $NF}')
 
+OneButtonInfoBox \
+	"If there is not an account on the next screen that you know the password to, please contact $IT for assistance." \
+    "Warning" \
+    "OK"
+
 # check if actually apfs disk or not
 if [[ -z "$cryptousers" ]]; then
     getPassword_guiAdminHFS
