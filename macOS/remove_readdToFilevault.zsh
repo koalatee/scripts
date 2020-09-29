@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 #### SETUP INSTRUCTIONS ####
 # 
@@ -100,34 +100,59 @@ loggedInUserFull=$(id -F $loggedInUser)
 USER_ID=$(/usr/bin/id -u "$loggedInUser")
 L_ID=$USER_ID
 L_METHOD="asuser"
-cryptousers=$(diskutil apfs listusers / |awk '/\+--/ {print $NF}')
+cryptooutput=("${(@f)$(diskutil apfs listusers /)}")
+cryptousers=()
+for line in $cryptooutput
+do
+    if [[ $(echo $line) =~ "-" ]]; then
+        cryptousers+=${line:4}
+    fi
+done
+adminGroupMembership=$(dscl . -read /Groups/admin |grep GroupMembership)
+
+# put the users in the thing
+allusers=()
+arrayChoice=()
+# already got the $cryptousers
+for guid in $cryptousers
+do
+    usercheck=$(dscl . -search /Users GeneratedUID $guid \
+        | awk 'NR == 1' \
+        | awk '{print $1}')
+        if [[ ! -z $usercheck ]]; then
+        # make sure the account you're going to use is an admin
+            if [[ $loggedInUser == $usercheck ]]; then
+                echo "not using $usercheck for authentication since they are logged in"
+            elif [[ $adminGroupMembership =~ $usercheck ]]; then
+                allusers+=($usercheck)
+            else
+                echo "$usercheck is a non-admin secure token holder"
+            fi
+        fi
+done
+
+# just zsh things
+arrayChoice=$(for item in $allusers
+do
+    echo $item
+done )
+
+# exit if this is the only user
+if [[ -z $arrayChoice ]]; then 
+    OneButtonInfoBox \
+        "Either there are no additional admin users on this machine or you are not logged in as the user you are trying to change. 
+        
+Please make sure you have everything backed up to prevent potential data loss and contact $IT for assistance." \
+        "ERROR" \
+        "OK"
+fi
 
 ########## function-ing ##########
 # get passwords
 getPassword_guiAdminAPFS () {
-    allusers=()
-    arrayChoice=()
-    # already got the $cryptousers
-    for GUID in $cryptousers
-    do
-        usercheck=$(sudo dscl . -search /Users GeneratedUID $GUID \
-        | awk 'NR == 1' \
-        | awk '{print $1}')
-        if [[ ! -z $usercheck ]]; then
-            echo $usercheck
-            allusers+=($usercheck)
-        fi
-    done
-    # make it nice for applescript
-    for item in ${allusers[@]}
-    do
-        arrayChoice+=$"${item}\n"
-    done
-    arrayChoice=${arrayChoice%??}
-
     # Let's-a go!
     guiAdmin="$(listChoice \
-        "Please select a user with secure token that you know the password to:" \
+        "Please select an admin user with secure token that you know the password to:" \
         "Select SecureToken User" \
         "Cancel" \
         "OK" \
@@ -302,12 +327,12 @@ securetoken_success () {
 }
 
 confirmation=$(TwoButtonInfoBox \
-    "Make sure you are not trying to modify the only SecureToken User, or it may break." \
+	"Make sure you are not trying to modify the only SecureToken User, or it may break." \
     "WARNING" \
     "Cancel" \
     "OK")
 if [[ -z "$confirmation" ]]; then
-    echo "exiting"
+	echo "exiting"
     exit 0
 fi
 
@@ -315,13 +340,13 @@ fi
 getPassword_guiAdminAPFS
 getPassword_loggedInUser
 # Remove the user from filevault:
-# - fdesetup remove -user {USERNAME}
+# - fdesetup remove -user {userASURITE}
 filevault_remove
 # Now remove the token: 
-# - Sysadminctl interactive -secureTokenOff {USERNAME} -password 
+# - Sysadminctl interactive -secureTokenOff {userASURITE} -password 
 securetoken_removal
 # Now turn it back on:
-# - Sysadminctl interactive -secureTokenOn {USERNAME} -password 
+# - Sysadminctl interactive -secureTokenOn {userASURITE} -password 
 securetoken_add
 # Should automatically be added to filevault, check with:
 # Run this command to make sure the user shows up in the filevault list 
