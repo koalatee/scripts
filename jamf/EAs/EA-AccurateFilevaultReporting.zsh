@@ -1,26 +1,20 @@
-#!/bin/bash
-# Accurate FV2 reporting?
+#!/bin/zsh
+
+# More Accurate (than jamf) FV2 reporting 
 # Write to EA for smart group reporting
 
-###
-#
-#           Written by jjourney 2/2018
+## 10/2020 jjourney
+# moved to zsh
+# compatibility with macOS 11
+
+### 
 #           Taken from rtrouton (as always)
 #           https://github.com/rtrouton/rtrouton_scripts/blob/master/rtrouton_scripts/check_apfs_encryption/check_apfs_encryption.sh
 #           https://github.com/rtrouton/rtrouton_scripts/blob/master/rtrouton_scripts/Casper_Extension_Attributes/filevault_2_encryption_check/filevault_2_encryption_check_extension_attribute.sh
 #
-###
-
-###
-#
-#           Requirements: api user with permissions to write to EA
-#                         encrypted strings: https://github.com/jamfit/Encrypted-Script-Parameters
-#           Requirements: extension attribute (EA), named appropriately. 
-#                         recommend a name with no spaces - "FV2Status" for instance
-#                  Setup: Input your jamf address for "apiURL"
-#                         Input the EA name for "ea_name"
-#                         Smart groups can be used for each EA value/message
-#			  Enter string decryption for $apiUser and $apiPass
+#           Modifications:
+#               - this doesn't run every recon like a normal EA but runs on a schedule/on demand
+#               - this adds the apiUser/apiPass, jamf, DecryptString, and API PUT at the end
 #
 ###
 
@@ -31,12 +25,11 @@ function DecryptString() {
 }
 
 # Decrypt password
-# Add salt + passphrase for each, see encrypted strings link above
-apiUser=$(DecryptString $4 '' '')
-apiPass=$(DecryptString $5 '' '')
+apiUser=$(DecryptString $4 '03a49bc11d67608c' '11b9ec057f88069ab643816b')
+apiPass=$(DecryptString $5 '9183a4a510332d53' 'a41775e19fc4f189f2e206dd')
 
 # API URL
-apiURL=""
+jamfURL=""
 
 # name of the EA 
 ea_name=""
@@ -68,18 +61,12 @@ FVDECRYPTED="Filevault is Off."
 FVNA="Filevault unavailable"
 FVVM="No CoreStorage, probably VM"
 
+ENCRYPTSTATUS="/private/tmp/encrypt_status.txt"
+ENCRYPTDIRECTION="/private/tmp/encrypt_direction.txt"
+
 # OS info
 osvers_major=$(sw_vers -productVersion | awk -F. '{print $1}')
 osvers_minor=$(sw_vers -productVersion | awk -F. '{print $2}')
-
-# Checks to see if the OS on the Mac is 10.7 or higher.
-# If it is not, the following message is displayed without quotes:
-#
-# "FileVault 2 Encryption Not Available For This Version Of Mac OS X"
-
-if [[ ${osvers_major} -eq 10 ]] && [[ ${osvers_minor} -lt 7 ]]; then
-    result="$FVNA"
-fi
 
 # If the Mac is running 10.7 or higher, but the boot volume
 # is not a CoreStorage volume, the following message is 
@@ -130,10 +117,6 @@ LV_FAMILY_UUID=$(diskutil cs info / | awk '/Parent LVF UUID/ {print $4;exit}')
     
 CONTEXT=$(diskutil cs list $LV_FAMILY_UUID | awk '/Encryption Context/ {print $3;exit}')
     
-if [[ ${osvers_major} -eq 10 ]] && [[ ${osvers_minor} -eq 7 || ${osvers_minor} -eq 8 ]]; then
-    CONVERTED=$(diskutil cs list $LV_UUID | awk '/Size \(Converted\)/ {print $5,$6;exit}')
-fi
-    
 if [[ ${osvers_major} -eq 10 ]] && [[ ${osvers_minor} -ge 9 ]]; then
     CONVERTED=$(diskutil cs list $LV_UUID | awk '/Conversion Progress/ {print $3;exit}')    
 fi
@@ -170,9 +153,9 @@ elif [[ ${osvers_major} -eq 10 ]] && [[ ${osvers_minor} -ge 7 ]] && [[ ${osvers_
     fi
     
 # This section does checking of the Mac's FileVault 2 status
-# macOS 10.11.x and higher
-# Currently tested for 10.11.x, 10.12.x, and 10.13.x
-# check to see if the boot drive is formatted with APFS or HFS+
+# on 10.11.x and 10.12.x 
+# If the OS on the Mac is 10.13 or higher, check to see if the
+# boot drive is formatted with APFS or HFS+
     
 elif [[ ${osvers_major} -eq 10 ]] && [[ ${osvers_minor} -ge 11 ]] && [[ "$boot_filesystem_check" = "hfs" ]]; then
     if [[ "$ENCRYPTION" = "None" ]] && [[ $(diskutil cs list "$LV_UUID" | awk '/Conversion Progress/ {print $3;exit}') == "" ]]; then
@@ -213,6 +196,36 @@ else
     result="FV2 status: error"
 fi
 
+# add a separate arg for macOS 11, this has been tested as working on a MBPro with Touch ID
+if [[ ${osvers_major} -eq 11 ]] && [[ "$boot_filesystem_check" = "apfs" ]]; then
+    ENCRYPTSTATUS=$(fdesetup status | xargs)
+    if [[ -z $(echo "$ENCRYPTSTATUS" | awk '/Encryption | Decryption/') ]]; then
+        ENCRYPTSTATUS=$(fdesetup status | head -1)
+        result="$ENCRYPTSTATUS"
+    else
+        ENCRYPTSTATUS=$(fdesetup status | tail -1)
+        result="$ENCRYPTSTATUS"
+    fi
+else
+    result="FV2 status: error"
+fi
+
+# Remove the temp files created during the script
+
+if [ -f "$CORESTORAGESTATUS" ]; then
+   rm -f "$CORESTORAGESTATUS"
+fi
+
+if [ -f "$ENCRYPTSTATUS" ]; then
+   rm -f "$ENCRYPTSTATUS"
+fi
+
+if [ -f "$ENCRYPTDIRECTION" ]; then
+   rm -f "$ENCRYPTDIRECTION"
+fi
+
+echo "$result written to EA: $ea_name"
+
 xmlString="<?xml version=\"1.0\" encoding=\"UTF-8\"?><computer><extension_attributes><extension_attribute><name>$ea_name</name><value>$result</value></extension_attribute></extension_attributes></computer>"
 
 curl \
@@ -220,8 +233,8 @@ curl \
     -u ${apiUser}:${apiPass} \
     -X PUT \
     -H "Content-Type: text/xml" \
-    -d "${xmlString}" "${apiURL}/JSSResource/computers/udid/$udid"
+    -d "${xmlString}" "${jamfURL}/JSSResource/computers/udid/$udid"
 
-echo "wrote $result to EA: $ea_name"
+echo "$result written to EA: $ea_name"
 
 exit 0
