@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 ###
 #
@@ -14,29 +14,17 @@
 #   Last Modified:  2017-10-04
 #         Version:  1.0
 #
-###
-
-###
-#
 #       Changed by: jjourney 10/6/2017
 #          changes: Changed password prompt / check to match the code in 
 #                   Elliot Jordan <elliot@elliotjordan.com> FileVault key upload script
 #                   https://github.com/homebysix/jss-filevault-reissue
 #                   Set the guiAdmin
 #
-###
-
-###
-#
 #       Changed by: jjourney 2/2018
 #          changes: Code re-arranged for better logic due to changes
 #                   Updated secureToken code because it now(?) requires auth or interactive
 #                   Adds user to filevault
 #                   Run "sudo diskutil apfs updatePreboot /" at the end 
-#
-###
-
-###
 #
 #       Changed by: jjourney 08/2018
 #          changes: guiAdmin now gives you the current users that already have secureToken
@@ -45,22 +33,24 @@
 #                   Added all osascript functions, should be easier to read
 #                   Can now be used for both HFS / APFS 
 #
+#       Changed by: jjourney 04/2020
+#          changes: moved to zsh - this has some minor changes, especially when dealing with arrays
+#                   removed last of jamf mentions (not needed)
+#		    only shows admin users that have token
+#                   
 ###
 
 ###
 #
-#       Changed by: jjourney 11/2018
-#          changes: changed how to get cryptousers and processing the GUIDs
-#                   accounts for users over 8 char and some 10.14(?) issues
+#            SETUP: Fill in relevant IT + FORGOT_PW_MESSAGE
 #
 ###
 
-###
-#
-#            Setup: Fill in relevant IT + FORGOT_PW_MESSAGE
-#                   Only jamf relevant piece is line 446, calls a policy to make current user admin, jamf not necessary
-#
-###
+########## variables ##########
+IT=""
+PROMPT_TITLE="Password Needed For FileVault"
+FORGOT_PW_MESSAGE="You made five incorrect password attempts.
+Please contact the $IT for assistance."
 
 # applescript
 #
@@ -134,41 +124,39 @@ end tell
 EOT
 }
 
-########## variables ##########
-# you can edit these
-PROMPT_TITLE="Password Needed For FileVault"
-IT=""
-FORGOT_PW_MESSAGE="You made five incorrect password attempts.
-Please contact $IT."
-adminfix="" 
-
 # leave these values as-is
-loggedInUser=$(/usr/bin/python -c 'from SystemConfiguration import SCDynamicStoreCopyConsoleUser; import sys; username = (SCDynamicStoreCopyConsoleUser(None, None, None) or [None])[0]; username = [username,""][username in [u"loginwindow", None, u""]]; sys.stdout.write(username + "\n");')
+loggedInUser=$( scutil <<< "show State:/Users/ConsoleUser" | awk -F': ' '/[[:space:]]+Name[[:space:]]:/ { if ( $2 != "loginwindow" ) { print $2 }}' )
 loggedInUserFull=$(id -F $loggedInUser)
-jamfBin="/usr/local/jamf/bin/jamf"
+# get users in admin group
+adminGroupMembership=$(dscl . -read /Groups/admin | awk '/GroupMembership:/{for(i=2;i<=NF;i++){out=out" "$i}; print out}')
 
-########## function-ing ##########
+########## function ##########
 # get password for admin that has secure token
 getPassword_guiAdminAPFS () {
     allusers=()
+    arrayChoice=()
     # already got the $cryptousers
-    for GUID in $cryptousers
+    for guid in $cryptousers
     do
-        usercheck=$(sudo dscl . -search /Users GeneratedUID $GUID \
-        | awk 'NR == 1' \
-        | awk '{print $1}')
-        if [[ ! -z $usercheck ]]; then
-            echo $usercheck
-            allusers+=($usercheck)
-        fi
+        usercheck=$(dscl . -search /Users GeneratedUID $guid \
+            | awk 'NR == 1' \
+            | awk '{print $1}')
+            if [[ ! -z $usercheck ]]; then
+            # make sure the account you're going to use is an admin
+                if [[ $adminGroupMembership =~ $usercheck ]]; then
+                    allusers+=($usercheck)
+                else
+                    echo "$usercheck is a non-admin secure token holder"
+                fi
+            fi
     done
-    # make it nice for applescript
-    for item in $allusers
+    
+    # just zsh things
+    arrayChoice=$(for item in $allusers
     do
-        arrayChoice+=$"${item}\n"
-    done
-    arrayChoice=$(echo $arrayChoice |sed 's/..$//')
-
+        echo $item
+    done )
+    
     # Let's-a go!
     guiAdmin="$(listChoice \
         "Please select a user with secure token that you know the password to:" \
@@ -213,14 +201,16 @@ getPassword_guiAdminAPFS () {
 }
 getPassword_guiAdminHFS () {
     arrayChoice=()
-    # already got the $cryptousers
-    fvusers=$(fdesetup list |awk -F, '{print $1}')
-    for users in $fvusers
-    do
-        arrayChoice+=$"${users}\n"
-    done
-    # make it nice for applescript
-    arrayChoice=$(echo $arrayChoice |sed 's/..$//')
+    # get the fdesetup info
+    echo "getting fdesetup info"
+    fvoutput=("${(@f)$(fdesetup list |awk -F, '{print $1}')}")
+    # just zsh things
+    arrayChoice=$(for users in $fvoutput
+        do
+            if [[ $adminGroupMembership =~ $users ]]; then
+                echo $users
+            fi
+        done)
 
     # Let's-a go!
     guiAdmin="$(listChoice \
@@ -441,15 +431,19 @@ adduser_filevaultHFS () {
     fi
 }
 
-# make sure user is admin
-# assumes it's bound to AD
-$jamfBin policy -event $adminfix
-
 ########## main process ##########
-cryptousers=$(diskutil apfs listusers / |awk '/\+--/ {print $NF}')
+# get GUID of token users
+cryptooutput=("${(@f)$(diskutil apfs listusers /)}")
+cryptousers=()
+for line in $cryptooutput
+do
+    if [[ $(echo $line) =~ "-" ]]; then
+        cryptousers+=${line:4}
+    fi
+done
 
 OneButtonInfoBox \
-	"If there is not an account on the next screen that you know the password to, please contact $IT for assistance." \
+	"If there is not an account on the next screen that you know the password to, please contact RTS for assistance." \
     "Warning" \
     "OK"
 
