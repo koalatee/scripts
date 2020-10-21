@@ -1,16 +1,18 @@
-#!/bin/bash
+#!/bin/zsh
 
 # jjourney 12-2018
-# try and help with updating fv password
+# try and help with updating fv password if they are out of sync
 
-# diskutil apfs changePassphrase $disk -user $GUID
+# essentially runs the following command:
+# diskutil apfs changePassphrase $disk -user $GUID -oldPassphrase $oldPW -newPassphrase $currentPW
 
 # error messages
-CONTACT_IT=""
-NEW_PASSWORD_MESSAGE=""
-OLD_PASSWORD_MESSAGE=""
-INCORRECT_PASSWORD_MESSAGE=""
-SUCCESS_MESSAGE=""
+IT=""
+CONTACT_IT="Something went wrong when trying to change your password. Please try again or contact $IT for further assistance"
+NEW_PASSWORD_MESSAGE="Please enter your new password:"
+OLD_PASSWORD_MESSAGE="Please enter the old password (the one that currently works to unlock Filevault):"
+INCORRECT_PASSWORD_MESSAGE="Sorry, that password was incorrect. Please try again:"
+SUCCESS_MESSAGE="Your filevault password has been successfully updated. Please contact $IT if you have any more problems"
 
 # applescript 
 #
@@ -94,32 +96,38 @@ end tell
 EOT
 }
 
-# 
-cryptousers=$(diskutil apfs listusers / |awk '/\+--/ {print $NF}')
+# get GUID of token users
+cryptooutput=("${(@f)$(diskutil apfs listusers /)}")
+cryptousers=()
+for line in $cryptooutput
+do
+    if [[ $(echo $line) =~ "-" ]]; then
+        cryptousers+=${line:4}
+    fi
+done
+
 allusers=()
 arrayChoice=()
 # already got the $cryptousers
-for GUID in $cryptousers
+for guid in $cryptousers
 do
-    usercheck=$(dscl . -search /Users GeneratedUID $GUID \
-    | awk 'NR == 1' \
-    | awk '{print $1}')
-    if [[ ! -z $usercheck ]]; then
-        echo $usercheck
-        allusers+=($usercheck)
-    fi
+    usercheck=$(dscl . -search /Users GeneratedUID $guid \
+        | awk 'NR == 1' \
+        | awk '{print $1}')
+        if [[ ! -z $usercheck ]]; then
+            allusers+=($usercheck)
+        fi
 done
-# make it nice for applescript
-for item in ${allusers[@]}
+    
+arrayChoice=$(for item in $allusers
 do
-    arrayChoice+=$"${item}\n"
-done
-arrayChoice=$(echo $arrayChoice |sed 's/..$//')
+    echo $item
+done )
 
 # Let's-a go!
-# apparently doing list osascript first doesn't work in 10.15 catalina
+# apparently doing lists first doesn't work in 10.15 catalina
 OneButtonInfoBox \
-	"$CONTACT_IT" \
+	"If this does not work, please reach out to RTS for assistance to resolve." \
     "Warning" \
     "OK"
     
@@ -128,7 +136,7 @@ changeUser="$(listChoice \
     "Click To Select User" \
     "Cancel" \
     "OK" \
-    "$arrayChoice")"
+    $arrayChoice)"
 if [[ "$changeUser" =~ "false" ]]; then
     echo "Cancelled by user"
     exit 0
@@ -194,8 +202,6 @@ OneButtonInfoBox \
     "Success!" \
     "OK" &
     
-diskutil apfs updatePreboot /
-
 # clear variables
 unset oldPassword
 unset newPassword
