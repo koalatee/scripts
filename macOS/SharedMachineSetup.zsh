@@ -1,30 +1,18 @@
-#!/bin/sh
+#!/bin/zsh
 
-# script purpose:
-# This uses admin input to set up a standard account that has no login ability but can unlock filevault. 
-# Once filevault is bypassed the user can sign in at login window
-# Helpful if you need filevault enabled in a shared space but don't want to enable every user for filevault.
-
-# this script will:
 # get list of current cryptousers
-# get pw of selected user
+#  - get pw of selected user that is admin
 # input new username
 # input new password
 # create user, grant token, add to filevault 
-#      block login ability
+#  - block login ability
 # sudo defaults write /Library/Preferences/com.apple.loginwindow DisableFDEAutoLogin -bool YES
 
-########### SETUP ##############
-#
-#     fill in any info below
-#     run script, see above for what this does
-#
-################################
-
-# things you can setup
+# variables
 PROMPT_TITLE="Password Needed For FileVault"
-FORGOT_PW_MESSAGE="You made five incorrect password attempts."
-IT=""
+$IT=""
+FORGOT_PW_MESSAGE="You made five incorrect password attempts.
+Please contact $IT for assistance."
 
 # applescript
 #
@@ -98,46 +86,62 @@ end tell
 EOT
 }
 
-cryptousers=$(diskutil apfs listusers / |awk '/\+--/ {print $NF}')
+###### DO NOT CHANGE BELOW THIS ######
+# leave these values as-is
+loggedInUser=$( scutil <<< "show State:/Users/ConsoleUser" | awk -F': ' '/[[:space:]]+Name[[:space:]]:/ { if ( $2 != "loginwindow" ) { print $2 }}' )
+loggedInUserFull=$(id -F $loggedInUser)
+# Get information necessary to display messages in the current user's context.
+USER_ID=$(/usr/bin/id -u "$loggedInUser")
+L_ID=$USER_ID
+L_METHOD="asuser"
+cryptooutput=("${(@f)$(diskutil apfs listusers /)}")
+cryptousers=()
+for line in $cryptooutput
+do
+    if [[ $(echo $line) =~ "-" ]]; then
+        cryptousers+=${line:4}
+    fi
+done
+adminGroupMembership=$(dscl . -read /Groups/admin |grep GroupMembership)
 
-# for APFS
-getPassword_guiAdminAPFS () {
-    allusers=()
-    arrayChoice=()
-    # already got the $cryptousers
-    for GUID in $cryptousers
-    do
-        usercheck=$(dscl . -search /Users GeneratedUID $GUID \
+# put the users in the thing
+allusers=()
+arrayChoice=()
+# already got the $cryptousers
+for guid in $cryptousers
+do
+    usercheck=$(dscl . -search /Users GeneratedUID $guid \
         | awk 'NR == 1' \
         | awk '{print $1}')
         if [[ ! -z $usercheck ]]; then
-            echo $usercheck
-            allusers+=($usercheck)
+        # make sure the account you're going to use is an admin
+            if [[ $adminGroupMembership =~ $usercheck ]]; then
+                allusers+=($usercheck)
+                echo "adding $usercheck"
+            else
+                echo "$usercheck is a non-admin secure token holder"
+            fi
         fi
-    done
-    # make it nice for applescript
-    if [[ "echo ${#allusers[@]}" > 1 ]]; then
-        for item in ${allusers[@]}
-        do
-            arrayChoice+=$"${item}\n"
-        done
-        arrayChoice=${arrayChoice%??}
-    else
-        arrayChoice=$allusers
-    fi
+done
 
+# just zsh things
+arrayChoice=$(for item in $allusers
+do
+    echo $item
+done )
+
+getPassword_guiAdminAPFS () {
     # Let's-a go!
     guiAdmin="$(listChoice \
-        "Please select a user with secure token that you know the password to:" \
+        "Please select an admin user with secure token that you know the password to:" \
         "Select SecureToken User" \
         "Cancel" \
         "OK" \
-        $arrayChoice)"
+        $arrayChoice )"
     if [[ "$guiAdmin" =~ "false" ]]; then
         echo "Cancelled by user"
         exit 0
     fi
-
     # Get the $guiAdmin password via a prompt.
     echo "Prompting $guiAdmin for their Mac password..."
     guiAdminPass="$(hiddenInputNoCancel \
@@ -155,68 +159,6 @@ getPassword_guiAdminAPFS () {
             "$PROMPT_TITLE" \
             "Cancel" \
             "OK" )"
-            if [[ "$guiAdminPass" =~ "false" ]] || [[ -z "$guiAdminPass" ]]; then
-                exit 0
-            fi
-        if (( TRY >= 5 )); then
-            echo "[ERROR] Password prompt unsuccessful after 5 attempts. Displaying \"forgot password\" message..."
-            OneButtonInfoBox \
-                "$FORGOT_PW_MESSAGE" \
-                "$PROMPT_TITLE" \
-                "OK" &
-            exit 1
-        fi
-    done
-    echo "Successfully prompted for $guiAdmin password."
-}
-# if system is HFS still
-getPassword_guiAdminHFS () {
-	loggedInUser=$(/usr/bin/python -c 'from SystemConfiguration import SCDynamicStoreCopyConsoleUser; import sys; username = (SCDynamicStoreCopyConsoleUser(None, None, None) or [None])[0]; username = [username,""][username in [u"loginwindow", None, u""]]; sys.stdout.write(username + "\n");')
-    arrayChoice=()
-    # already got the $cryptousers
-    fvusers=$(fdesetup list |awk -F, '{print $1}')
-    if [[ ! $fvusers == $loggedInUser ]]; then
-        for users in $fvusers
-        do
-            arrayChoice+=$"${users}\n"
-        done
-        # make it nice for applescript
-        arrayChoice=${arrayChoice%??}
-    else
-        arrayChoice=$fvusers
-    fi
-    
-    echo "$arrayChoice users found"
-
-    # Let's-a go!
-    guiAdmin="$(listChoice \
-        "Please select a user account with that you know the password to:" \
-        "Select Existing Filevault User" \
-        "Cancel" \
-        "OK" \
-        $arrayChoice)"
-    if [[ "$guiAdmin" =~ "false" ]]; then
-        echo "Cancelled by user"
-        exit 0
-    fi
-    # Get the $guiAdmin password via a prompt.
-    echo "Prompting for $guiAdminPass Mac password..."
-    guiAdminPass="$(hiddenInputNoCancel \
-        "Please enter the password for $guiAdmin:" \
-        "$PROMPT_TITLE" \
-        "OK")"
-        
-    # Thanks to James Barclay (@futureimperfect) for this password validation loop.
-    TRY=1
-    until /usr/bin/dscl /Search -authonly "$guiAdmin" "$guiAdminPass" &>/dev/null; do
-        (( TRY++ ))
-        echo "Prompting for $guiAdmin Mac password (attempt $TRY)..."
-        guiAdminPass="$(hiddenInput \
-            "Sorry, that password was incorrect. Please try again:" \
-            "$PROMPT_TITLE" \
-            "Cancel" \
-            "OK" )"
-            echo "This is the password: $guiAdminPass"
             if [[ "$guiAdminPass" =~ "false" ]] || [[ -z "$guiAdminPass" ]]; then
                 exit 0
             fi
@@ -288,59 +230,6 @@ adduser_filevaultAPFS () {
     # run updatePreboot to show user
     sudo diskutil apfs updatePreboot /
 }
-# add user to filevault HFS+
-adduser_filevaultHFS () {
-    echo "Checking Filevault status for $newUser"
-    filevault_list=$(sudo fdesetup list 2>&1)
-    if [[ ! "$filevault_list" =~ "$newUser" ]]; then
-        echo "User not found, adding"
-        # create the plist file:
-        echo '<?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-            <key>Username</key>
-            <string>'$guiAdmin'</string>
-            <key>Password</key>
-            <string>'$guiAdminPass'</string>
-            <key>AdditionalUsers</key>
-            <array>
-                <dict>
-                    <key>Username</key>
-                    <string>'$newUser'</string>
-                    <key>Password</key>
-                    <string>'$newUserPass'</string>
-                </dict>
-            </array>
-            </dict>
-            </plist>' > /tmp/fvenable.plist 
-
-        # now enable FileVault
-        fdesetup add -inputplist < /tmp/fvenable.plist
-        rm -rf /tmp/fvenable.plist
-        
-        filevault_list=$(sudo fdesetup list 2>&1)
-        if [[ ! "$filevault_list" =~ "$newUser" ]]; then
-            echo "Error adding user!"
-            OneButtonInfoBox \
-                "Failed to add $newUser to filevault. Please try to add manually." \
-                "Failed to add" \
-                "OK" &
-            elif [[ "$filevault_list" =~ "$newUser" ]]; then
-            echo "Success adding user!"
-            OneButtonInfoBox \
-                "Succeeded in adding $newUser to filevault." \
-                "Success!" \
-                "OK" &
-        fi
-        elif [[ "$filevault_list" =~ "$newUser" ]]; then
-        echo "Success adding user!"
-        OneButtonInfoBox \
-            "$newUser is a filevault enabled user." \
-            "Success!" \
-            "OK" &
-    fi
-}
 
 # add SecureToken to $loggedInUser account to allow FileVault access
 securetoken_add () {
@@ -373,41 +262,37 @@ createAccount () {
     dscl . -passwd /Users/$newUser "$newUserPass"
 }
 
-# check if actually apfs disk or not
-if [[ -z "$cryptousers" ]]; then
-    getPassword_guiAdminHFS
-    createAccount
-    adduser_filevaultHFS
-    unset newUserPass
-    unset guiAdminPass
-else
-    getPassword_guiAdminAPFS
-    createAccount
-    secureTokenCheck=$(sudo sysadminctl -adminUser $guiAdmin -adminPassword $guiAdminPass -secureTokenStatus "$newUser" 2>&1)
+#  run it
+OneButtonInfoBox \
+    "This policy creates the user you want. If you have already created the user account, please use a different name or cancel the policy and delete the account." \
+    "Warning" \
+    "OK"
 
-    # add SecureToken to $loggedInUser if missing
-    if [[ "$secureTokenCheck" =~ "DISABLED" ]]; then
-        securetoken_add
-        securetoken_double_check
+getPassword_guiAdminAPFS
+createAccount
+secureTokenCheck=$(sudo sysadminctl -adminUser $guiAdmin -adminPassword $guiAdminPass -secureTokenStatus "$newUser" 2>&1)
+
+# add SecureToken to new account if missing
+if [[ "$secureTokenCheck" =~ "DISABLED" ]]; then
+    securetoken_add
+    securetoken_double_check
+    adduser_filevaultAPFS
+    elif [[ "$secureTokenCheck" =~ "ENABLED" ]]; then
         adduser_filevaultAPFS
-        elif [[ "$secureTokenCheck" =~ "ENABLED" ]]; then
-            adduser_filevaultAPFS
-        else
-            echo "Error with sysadminctl"
-            OneButtonInfoBox \
-                "Failure to run. Please contact $IT" \
-                "Failure" \
-                "OK" &
-    fi
-
-    # Clear password variable.
-    unset newUserPass
-    unset guiAdminPass
+    else
+        echo "Error with sysadminctl"
+        OneButtonInfoBox \
+            "Failure to run. Please contact $IT" \
+            "Failure" \
+            "OK" &
 fi
+
+# Clear password variable.
+unset newUserPass
+unset guiAdminPass
 
 OneButtonInfoBox \
     "All done. You can now bypass filevault with the created account." \
     "Complete" \
     "OK" &
-
 sudo defaults write /Library/Preferences/com.apple.loginwindow DisableFDEAutoLogin -bool YES
