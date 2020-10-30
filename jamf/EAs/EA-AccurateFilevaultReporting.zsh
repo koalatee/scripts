@@ -192,6 +192,16 @@ elif [[ ${osvers_major} -eq 10 ]] && [[ ${osvers_minor} -ge 13 ]] && [[ "$boot_f
         ENCRYPTSTATUS=$(fdesetup status | tail -1)
         result="$ENCRYPTSTATUS"
     fi
+# add a separate arg for macOS 11, this has been tested as working on a MBPro with Touch ID
+elif [[ ${osvers_major} -eq 11 ]] && [[ "$boot_filesystem_check" = "apfs" ]]; then
+    ENCRYPTSTATUS=$(fdesetup status | xargs)
+    if [[ -z $(echo "$ENCRYPTSTATUS" | awk '/Encryption | Decryption/') ]]; then
+        ENCRYPTSTATUS=$(fdesetup status | head -1)
+        result="$ENCRYPTSTATUS"
+    else
+        ENCRYPTSTATUS=$(fdesetup status | tail -1)
+        result="$ENCRYPTSTATUS"
+    fi
 else
     result="FV2 status: error"
 fi
